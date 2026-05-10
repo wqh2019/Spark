@@ -12,6 +12,7 @@
 | 运行模式 | 异步 | 现代Python风格，支持异步工具 |
 | 终止条件 | LLM自主 + 最大步数 | 防止无限循环 |
 | 错误处理 | 反馈给LLM | 让LLM决定如何处理错误 |
+| 配置管理 | 环境变量 + 代码分离 | 敏感信息走环境变量，提示词代码化管理 |
 
 ## 架构
 
@@ -28,19 +29,27 @@
 ### Agent类
 
 ```python
+import os
+from openai import AsyncOpenAI
+from spark.prompts import DEFAULT_SYSTEM_PROMPT
+
 class Agent:
     def __init__(
         self,
-        model: str = "gpt-4",
+        model: str | None = None,
         tools: list[Tool] | None = None,
         system_prompt: str | None = None,
         api_key: str | None = None,
+        base_url: str | None = None,
     ):
-        self.model = model
+        self.model = model or os.getenv("OPENAI_MODEL", "gpt-4")
         self.tools = tools or []
-        self.system_prompt = system_prompt or "You are a helpful assistant."
+        self.system_prompt = system_prompt or DEFAULT_SYSTEM_PROMPT
         self._tool_map = {t.name: t for t in self.tools}
-        self.client = AsyncOpenAI(api_key=api_key)
+        self.client = AsyncOpenAI(
+            api_key=api_key or os.getenv("OPENAI_API_KEY"),
+            base_url=base_url or os.getenv("OPENAI_BASE_URL"),
+        )
 
     async def arun(self, message: str, max_steps: int = 10) -> str:
         """异步运行agent loop"""
@@ -184,8 +193,66 @@ spark/
 ├── __init__.py      # 导出 Agent, Tool, tool
 ├── agent.py         # Agent类（核心循环）
 ├── tool.py          # Tool类（已有）
-└── schema.py        # 工具schema生成
+├── schema.py        # 工具schema生成
+└── prompts/
+    ├── __init__.py      # 导出 DEFAULT_SYSTEM_PROMPT, build_system_prompt
+    ├── base.py          # 基础提示词常量
+    └── templates.py     # 提示词模板函数（可扩展）
 ```
+
+## 提示词模块
+
+`spark/prompts/base.py`:
+```python
+DEFAULT_SYSTEM_PROMPT = """You are a helpful AI assistant.
+You can use available tools to help answer questions.
+Always be accurate and helpful."""
+```
+
+`spark/prompts/templates.py`:
+```python
+def build_system_prompt(
+    role: str = "helpful AI assistant",
+    capabilities: list[str] | None = None,
+) -> str:
+    """构建自定义系统提示词"""
+    lines = [f"You are a {role}."]
+
+    if capabilities:
+        lines.append("\nCapabilities:")
+        lines.extend(f"- {cap}" for cap in capabilities)
+
+    return "\n".join(lines)
+```
+
+`spark/prompts/__init__.py`:
+```python
+from .base import DEFAULT_SYSTEM_PROMPT
+from .templates import build_system_prompt
+```
+
+## 配置管理
+
+敏感配置通过环境变量管理，使用 `.env` 文件：
+
+```env
+OPENAI_API_KEY=your-api-key-here
+OPENAI_BASE_URL=https://api.deepseek.com/v1
+OPENAI_MODEL=deepseek-v4
+```
+
+配置优先级：代码参数 > 环境变量 > 默认值
+
+## 依赖管理
+
+使用 `requirements.txt` 管理依赖：
+
+```
+openai>=1.0.0
+python-dotenv>=1.0.0
+```
+
+开发依赖在 `requirements-dev.txt` 中。
 
 ## 消息格式
 
@@ -254,6 +321,7 @@ OpenAI Chat API消息结构：
 
 ```python
 from spark import Agent, tool
+from spark.prompts import build_system_prompt
 
 @tool
 def search(query: str) -> str:
@@ -263,12 +331,21 @@ def search(query: str) -> str:
 @tool
 def calculate(expression: str) -> str:
     """计算数学表达式"""
-    return str(eval(expression))
+    # 注意：实际实现应使用安全的表达式解析
+    import ast
+    return str(ast.literal_eval(expression))
 
+# 使用默认配置（从环境变量读取）
+agent = Agent(tools=[search, calculate])
+
+# 或自定义配置
 agent = Agent(
-    model="gpt-4",
+    model="gpt-4-turbo",
     tools=[search, calculate],
-    system_prompt="你是一个智能助手。"
+    system_prompt=build_system_prompt(
+        role="智能助手",
+        capabilities=["网络搜索", "数学计算"]
+    ),
 )
 
 # 异步使用
@@ -283,6 +360,20 @@ print(result)
 
 ## 依赖
 
-现有依赖无需变更：
-- `openai>=1.0.0` - 已包含异步支持
+- `openai>=1.0.0` - OpenAI SDK，已包含异步支持
+- `python-dotenv>=1.0.0` - 加载 .env 文件
 - Python 3.10+ - 已支持`asyncio.iscoroutine`
+
+## 实现状态
+
+✅ 已完成实现，所有测试通过。
+
+### 实现细节
+
+1. **延迟初始化 OpenAI 客户端**：客户端在首次访问时才创建，避免在测试环境中不必要的 API key 验证。
+
+2. **JSON 解析错误处理**：工具参数解析失败时返回明确的错误信息。
+
+3. **复杂类型支持**：Schema 生成支持 `Optional[T]`、`list[T]`、`dict[K, V]` 等泛型类型。
+
+4. **同步方法兼容性**：`run()` 方法可在异步环境中正常工作。

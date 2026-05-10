@@ -2,7 +2,7 @@
 Tests for Tool.
 """
 
-from spark import tool, Tool
+from spark import Tool, tool
 
 
 def test_tool_decorator():
