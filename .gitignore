@@ -49,3 +49,6 @@ htmlcov/
 
 # Design docs (local only)
 docs/superpowers/
+
+# Claude Code config (local only)
+.claude/
