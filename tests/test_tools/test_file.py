@@ -137,3 +137,25 @@ class TestEditFile:
             result = edit_file(file_path, "nonexistent", "replacement")
             assert "Error" in result
             assert "not found" in result.lower()
+
+    def test_edit_file_file_not_exist(self):
+        """Should error when the file does not exist."""
+        result = edit_file("/nonexistent/path/file.txt", "old", "new")
+        assert "Error" in result
+        assert "not found" in result.lower()
+
+    def test_edit_file_is_directory(self):
+        """Should error when path is a directory."""
+        result = edit_file(tempfile.gettempdir(), "old", "new")
+        assert "Error" in result
+        assert "directory" in result.lower() or "not a file" in result.lower()
+
+    def test_edit_file_empty_string(self):
+        """Should error when old_string is empty."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            file_path = os.path.join(tmpdir, "edit.txt")
+            write_file(file_path, "Some content")
+
+            result = edit_file(file_path, "", "replacement")
+            assert "Error" in result
+            assert "empty" in result.lower()

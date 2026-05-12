@@ -96,6 +96,12 @@ def edit_file(file_path: str, old_string: str, new_string: str, replace_all: boo
     if not path.exists():
         return f"Error: File not found: {file_path}"
 
+    if path.is_dir():
+        return f"Error: Path is a directory, not a file: {file_path}"
+
+    if not old_string:
+        return "Error: old_string cannot be empty"
+
     try:
         with open(path, 'r', encoding='utf-8') as f:
             content = f.read()
