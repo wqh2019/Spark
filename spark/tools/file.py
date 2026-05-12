@@ -129,3 +129,53 @@ def edit_file(file_path: str, old_string: str, new_string: str, replace_all: boo
         return f"Error: Permission denied: {file_path}"
     except Exception as e:
         return f"Error: {str(e)}"
+
+
+@tool
+def list_dir(dir_path: str = ".") -> str:
+    """
+    List contents of a directory.
+
+    Args:
+        dir_path: Path to the directory (defaults to current directory)
+
+    Returns:
+        Directory listing as string, or error message
+    """
+    path = Path(dir_path)
+
+    if not path.exists():
+        return f"Error: Directory not found: {dir_path}"
+
+    if not path.is_dir():
+        return f"Error: Path is not a directory: {dir_path}"
+
+    try:
+        entries = list(path.iterdir())
+
+        # Separate directories and files
+        dirs = sorted([e for e in entries if e.is_dir()])
+        files = sorted([e for e in entries if e.is_file()])
+
+        result_lines = []
+
+        if dirs:
+            result_lines.append("Directories:")
+            for d in dirs:
+                result_lines.append(f"  {d.name}/")
+
+        if files:
+            result_lines.append("Files:")
+            for f in files:
+                size = f.stat().st_size
+                result_lines.append(f"  {f.name} ({size} bytes)")
+
+        if not dirs and not files:
+            return "Empty directory"
+
+        return '\n'.join(result_lines)
+
+    except PermissionError:
+        return f"Error: Permission denied: {dir_path}"
+    except Exception as e:
+        return f"Error: {str(e)}"

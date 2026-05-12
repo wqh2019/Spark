@@ -2,7 +2,7 @@
 import os
 import tempfile
 import pytest
-from spark.tools.file import read_file, write_file, edit_file
+from spark.tools.file import read_file, write_file, edit_file, list_dir
 
 
 class TestReadFile:
@@ -159,3 +159,35 @@ class TestEditFile:
             result = edit_file(file_path, "", "replacement")
             assert "Error" in result
             assert "empty" in result.lower()
+
+
+class TestListDir:
+    def test_list_dir_basic(self):
+        """Should list directory contents."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create some files and directories
+            os.makedirs(os.path.join(tmpdir, "subdir"))
+            open(os.path.join(tmpdir, "file1.txt"), 'w').close()
+            open(os.path.join(tmpdir, "file2.py"), 'w').close()
+
+            result = list_dir(tmpdir)
+
+            assert "file1.txt" in result
+            assert "file2.py" in result
+            assert "subdir" in result
+
+    def test_list_dir_nonexistent(self):
+        """Should error for non-existent directory."""
+        result = list_dir("/nonexistent/directory")
+        assert "Error" in result
+
+    def test_list_dir_file_path(self):
+        """Should error when given a file path."""
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            temp_path = f.name
+
+        try:
+            result = list_dir(temp_path)
+            assert "Error" in result
+        finally:
+            os.unlink(temp_path)
