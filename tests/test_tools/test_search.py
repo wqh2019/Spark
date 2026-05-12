@@ -112,3 +112,28 @@ class TestGrepContent:
 
             assert "pattern_in_py" in result
             assert "pattern_in_txt" not in result
+
+    def test_grep_invalid_regex_pattern(self):
+        """Should return error for invalid regex pattern."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = grep_content("[invalid(regex", tmpdir)
+            assert "Error" in result
+            assert "invalid regex" in result.lower()
+
+    def test_grep_path_not_found(self):
+        """Should return error for non-existent path."""
+        result = grep_content("pattern", "/nonexistent/directory")
+        assert "Error" in result
+        assert "not found" in result.lower()
+
+    def test_grep_path_is_file(self):
+        """Should return error when path is a file."""
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            temp_path = f.name
+
+        try:
+            result = grep_content("pattern", temp_path)
+            assert "Error" in result
+            assert "not a directory" in result.lower()
+        finally:
+            os.unlink(temp_path)

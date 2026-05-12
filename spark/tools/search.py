@@ -67,6 +67,9 @@ def grep_content(pattern: str, path: str = ".", file_pattern: str = "*") -> str:
     if not search_path.exists():
         return f"Error: Path not found: {path}"
 
+    if not search_path.is_dir():
+        return f"Error: Path is not a directory: {path}"
+
     try:
         regex = re.compile(pattern)
     except re.error as e:
