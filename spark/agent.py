@@ -5,13 +5,29 @@ Spark Agent - Core agent implementation with ReAct loop.
 import asyncio
 import json
 import os
-from typing import Any
+from typing import Any, AsyncGenerator
 
 from openai import AsyncOpenAI
 
 from spark.prompts import DEFAULT_SYSTEM_PROMPT
 from spark.schema import build_tool_schema
 from spark.tool import Tool
+
+
+class _SimpleToolCall:
+    """Simple tool call object for internal use in arun_stream."""
+
+    def __init__(self, data: dict):
+        self.id = data["id"]
+        self.function = _SimpleFunction(data["name"], data["arguments"])
+
+
+class _SimpleFunction:
+    """Simple function object for _SimpleToolCall."""
+
+    def __init__(self, name: str, arguments: str):
+        self.name = name
+        self.arguments = arguments
 
 
 class Agent:
@@ -93,6 +109,145 @@ class Agent:
                 })
 
         return "Error: Reached maximum steps without completing the task."
+
+    async def arun_stream(
+        self,
+        message: str,
+        messages: list[dict[str, Any]],
+        max_steps: int = 10,
+    ) -> AsyncGenerator[dict[str, Any], None]:
+        """
+        Run the agent with streaming output.
+
+        Args:
+            message: The user message to process
+            messages: Conversation history (list of message dicts)
+            max_steps: Maximum number of tool-calling steps
+
+        Yields:
+            Event dictionaries with types:
+            - {"type": "text_delta", "delta": "..."}
+            - {"type": "tool_call", "name": "...", "args": {...}}
+            - {"type": "tool_result", "name": "...", "result": "..."}
+            - {"type": "done"}
+            - {"type": "error", "message": "..."}
+        """
+        # Build full message list
+        full_messages: list[dict[str, Any]] = [
+            {"role": "system", "content": self.system_prompt},
+            *messages,
+            {"role": "user", "content": message},
+        ]
+
+        for step in range(max_steps):
+            try:
+                stream = await self.client.chat.completions.create(
+                    model=self.model,
+                    messages=full_messages,
+                    tools=self._build_tool_schema(),
+                    stream=True,
+                )
+
+                # Collect streaming response
+                content_chunks: list[str] = []
+                tool_calls_data: dict[int, dict] = {}  # index -> tool call data
+
+                async for chunk in stream:
+                    delta = chunk.choices[0].delta
+
+                    # Handle text content
+                    if delta.content:
+                        content_chunks.append(delta.content)
+                        yield {"type": "text_delta", "delta": delta.content}
+
+                    # Handle tool calls (streamed incrementally)
+                    if delta.tool_calls:
+                        for tc in delta.tool_calls:
+                            idx = tc.index
+                            if idx not in tool_calls_data:
+                                tool_calls_data[idx] = {
+                                    "id": tc.id or "",
+                                    "name": "",
+                                    "arguments": "",
+                                }
+                            if tc.function:
+                                if tc.function.name:
+                                    tool_calls_data[idx]["name"] = tc.function.name
+                                if tc.function.arguments:
+                                    tool_calls_data[idx]["arguments"] += tc.function.arguments
+
+                # Process tool calls if any
+                if tool_calls_data:
+                    # Build assistant message for history
+                    assistant_msg = {
+                        "role": "assistant",
+                        "content": "".join(content_chunks) or None,
+                        "tool_calls": [],
+                    }
+
+                    for idx in sorted(tool_calls_data.keys()):
+                        tc_data = tool_calls_data[idx]
+                        tool_name = tc_data["name"]
+
+                        # Yield tool call event
+                        try:
+                            args = json.loads(tc_data["arguments"])
+                        except json.JSONDecodeError:
+                            args = {}
+
+                        yield {
+                            "type": "tool_call",
+                            "name": tool_name,
+                            "args": args,
+                        }
+
+                        # Build tool call for message
+                        tool_call_obj = {
+                            "id": tc_data["id"],
+                            "type": "function",
+                            "function": {
+                                "name": tool_name,
+                                "arguments": tc_data["arguments"],
+                            },
+                        }
+                        assistant_msg["tool_calls"].append(tool_call_obj)
+
+                    full_messages.append(assistant_msg)
+
+                    # Execute each tool and add results
+                    for idx in sorted(tool_calls_data.keys()):
+                        tc_data = tool_calls_data[idx]
+                        tool_name = tc_data["name"]
+
+                        # Create a simple tool call object for _execute_tool
+                        tool_call_obj = _SimpleToolCall(tc_data)
+                        result = await self._execute_tool(tool_call_obj)
+
+                        yield {
+                            "type": "tool_result",
+                            "name": tool_name,
+                            "result": result,
+                        }
+
+                        full_messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc_data["id"],
+                            "content": result,
+                        })
+
+                    # Continue to next step
+                    continue
+
+                # No tool calls - we're done
+                yield {"type": "done"}
+                return
+
+            except Exception as e:
+                yield {"type": "error", "message": str(e)}
+                return
+
+        # Max steps reached
+        yield {"type": "error", "message": "Reached maximum steps without completing the task."}
 
     def run(self, message: str, max_steps: int = 10) -> str:
         """
