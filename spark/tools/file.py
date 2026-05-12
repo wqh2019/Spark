@@ -1,9 +1,7 @@
 # spark/tools/file.py
 """File operation tools."""
 
-import os
 from pathlib import Path
-from typing import Any
 
 from spark.tool import tool
 
@@ -31,15 +29,14 @@ def read_file(file_path: str, offset: int = 0, limit: int = 2000) -> str:
 
     try:
         with open(path, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-
-        # Apply offset and limit
-        selected_lines = lines[offset:offset + limit]
-
-        # Format with line numbers
-        result_lines = []
-        for i, line in enumerate(selected_lines, start=offset + 1):
-            result_lines.append(f"{i:6}\t{line.rstrip()}")
+            # Use lazy iteration for memory efficiency
+            result_lines = []
+            for i, line in enumerate(f):
+                if i < offset:
+                    continue
+                if i >= offset + limit:
+                    break
+                result_lines.append(f"{i + 1:6}\t{line.rstrip()}")
 
         return '\n'.join(result_lines)
 
