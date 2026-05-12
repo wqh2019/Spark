@@ -30,3 +30,9 @@ async def index():
     if index_path.exists():
         return FileResponse(str(index_path))
     return {"error": "index.html not found"}
+
+
+def run():
+    """Run the server programmatically."""
+    import uvicorn
+    uvicorn.run("spark.server.app:app", host="0.0.0.0", port=8000, reload=True)
