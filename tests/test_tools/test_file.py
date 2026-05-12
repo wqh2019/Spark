@@ -176,10 +176,17 @@ class TestListDir:
             assert "file2.py" in result
             assert "subdir" in result
 
+    def test_list_dir_empty(self):
+        """Should return 'Empty directory' for empty directory."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = list_dir(tmpdir)
+            assert result == "Empty directory"
+
     def test_list_dir_nonexistent(self):
         """Should error for non-existent directory."""
         result = list_dir("/nonexistent/directory")
         assert "Error" in result
+        assert "not found" in result.lower()
 
     def test_list_dir_file_path(self):
         """Should error when given a file path."""
@@ -189,5 +196,6 @@ class TestListDir:
         try:
             result = list_dir(temp_path)
             assert "Error" in result
+            assert "directory" in result.lower()
         finally:
             os.unlink(temp_path)
