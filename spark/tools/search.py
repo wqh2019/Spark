@@ -2,7 +2,6 @@
 """Search and find tools."""
 
 from pathlib import Path
-from typing import Any
 
 from spark.tool import tool
 
@@ -28,8 +27,8 @@ def glob_files(pattern: str, path: str = ".") -> str:
         return f"Error: Path is not a directory: {path}"
 
     try:
-        # Use recursive glob for ** patterns
-        matches = list(search_path.glob(pattern))
+        # Use recursive glob for ** patterns - filter to files only
+        matches = [m for m in search_path.glob(pattern) if m.is_file()]
 
         if not matches:
             return f"No files found matching pattern: {pattern}"
@@ -38,11 +37,12 @@ def glob_files(pattern: str, path: str = ".") -> str:
         matches.sort(key=lambda p: str(p))
         result_lines = [f"Found {len(matches)} file(s):"]
         for match in matches:
-            if match.is_file():
-                rel_path = match.relative_to(search_path)
-                result_lines.append(f"  {rel_path}")
+            rel_path = match.relative_to(search_path)
+            result_lines.append(f"  {rel_path}")
 
         return '\n'.join(result_lines)
 
+    except PermissionError:
+        return f"Error: Permission denied accessing: {path}"
     except Exception as e:
         return f"Error: {str(e)}"
