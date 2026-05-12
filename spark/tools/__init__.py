@@ -2,6 +2,6 @@
 # Tools package for Spark Agent framework
 
 from spark.tools.file import read_file, write_file, edit_file, list_dir
-from spark.tools.search import glob_files
+from spark.tools.search import glob_files, grep_content
 
-__all__ = ["read_file", "write_file", "edit_file", "list_dir", "glob_files"]
+__all__ = ["read_file", "write_file", "edit_file", "list_dir", "glob_files", "grep_content"]

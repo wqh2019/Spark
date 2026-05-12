@@ -1,6 +1,7 @@
 # spark/tools/search.py
 """Search and find tools."""
 
+import re
 from pathlib import Path
 
 from spark.tool import tool
@@ -44,5 +45,63 @@ def glob_files(pattern: str, path: str = ".") -> str:
 
     except PermissionError:
         return f"Error: Permission denied accessing: {path}"
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+
+@tool
+def grep_content(pattern: str, path: str = ".", file_pattern: str = "*") -> str:
+    """
+    Search for a regex pattern in files.
+
+    Args:
+        pattern: Regular expression pattern to search for
+        path: Directory to search in (defaults to current directory)
+        file_pattern: Glob pattern to filter files (defaults to all files)
+
+    Returns:
+        Matching lines with file paths and line numbers, or message if none found
+    """
+    search_path = Path(path)
+
+    if not search_path.exists():
+        return f"Error: Path not found: {path}"
+
+    try:
+        regex = re.compile(pattern)
+    except re.error as e:
+        return f"Error: Invalid regex pattern: {e}"
+
+    try:
+        matches = []
+        files_searched = 0
+
+        for file_path in search_path.rglob(file_pattern):
+            if not file_path.is_file():
+                continue
+
+            # Skip binary files and common non-text directories
+            if any(part in file_path.parts for part in ['.git', '__pycache__', 'node_modules', '.venv']):
+                continue
+
+            files_searched += 1
+
+            try:
+                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    for line_num, line in enumerate(f, 1):
+                        if regex.search(line):
+                            rel_path = file_path.relative_to(search_path)
+                            matches.append(f"{rel_path}:{line_num}: {line.rstrip()}")
+            except Exception:
+                continue
+
+        if not matches:
+            return f"No matches found for pattern '{pattern}' in {files_searched} file(s)"
+
+        result_lines = [f"Found {len(matches)} match(es) in {files_searched} file(s):"]
+        result_lines.extend(matches)
+
+        return '\n'.join(result_lines)
+
     except Exception as e:
         return f"Error: {str(e)}"
