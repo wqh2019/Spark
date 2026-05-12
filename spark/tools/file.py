@@ -75,3 +75,51 @@ def write_file(file_path: str, content: str) -> str:
         return f"Error: Permission denied: {file_path}"
     except Exception as e:
         return f"Error: {str(e)}"
+
+
+@tool
+def edit_file(file_path: str, old_string: str, new_string: str, replace_all: bool = False) -> str:
+    """
+    Replace text in a file with exact string matching.
+
+    Args:
+        file_path: Absolute or relative path to the file
+        old_string: The text to replace (must be unique unless replace_all is True)
+        new_string: The replacement text
+        replace_all: If True, replace all occurrences; if False, old_string must be unique
+
+    Returns:
+        Success message or error message
+    """
+    path = Path(file_path)
+
+    if not path.exists():
+        return f"Error: File not found: {file_path}"
+
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        count = content.count(old_string)
+
+        if count == 0:
+            return f"Error: String not found in file: '{old_string[:50]}...'"
+
+        if not replace_all and count > 1:
+            return f"Error: Found {count} occurrences of the string. Use replace_all=True or provide a more specific string."
+
+        if replace_all:
+            new_content = content.replace(old_string, new_string)
+        else:
+            new_content = content.replace(old_string, new_string, 1)
+
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(new_content)
+
+        occurrences = "all occurrences" if replace_all else "1 occurrence"
+        return f"Successfully replaced {occurrences} in {file_path}"
+
+    except PermissionError:
+        return f"Error: Permission denied: {file_path}"
+    except Exception as e:
+        return f"Error: {str(e)}"

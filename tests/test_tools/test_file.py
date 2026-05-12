@@ -2,7 +2,7 @@
 import os
 import tempfile
 import pytest
-from spark.tools.file import read_file, write_file
+from spark.tools.file import read_file, write_file, edit_file
 
 
 class TestReadFile:
@@ -91,3 +91,49 @@ class TestWriteFile:
             assert os.path.exists(file_path)
             with open(file_path, 'r') as f:
                 assert f.read() == "Nested content"
+
+
+class TestEditFile:
+    def test_edit_file_single_replace(self):
+        """Should replace a single occurrence."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            file_path = os.path.join(tmpdir, "edit.txt")
+            write_file(file_path, "Hello World\nGoodbye Everyone")
+
+            result = edit_file(file_path, "World", "Universe")
+
+            with open(file_path, 'r') as f:
+                content = f.read()
+            assert content == "Hello Universe\nGoodbye Everyone"
+
+    def test_edit_file_multiple_occurrences_error(self):
+        """Should error when old_string matches multiple times."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            file_path = os.path.join(tmpdir, "edit.txt")
+            write_file(file_path, "foo bar foo")
+
+            result = edit_file(file_path, "foo", "baz")
+            assert "Error" in result
+            assert "occurrences" in result.lower()
+
+    def test_edit_file_replace_all(self):
+        """Should replace all occurrences when replace_all is True."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            file_path = os.path.join(tmpdir, "edit.txt")
+            write_file(file_path, "foo bar foo baz foo")
+
+            result = edit_file(file_path, "foo", "qux", replace_all=True)
+
+            with open(file_path, 'r') as f:
+                content = f.read()
+            assert content == "qux bar qux baz qux"
+
+    def test_edit_file_not_found(self):
+        """Should error when old_string is not found."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            file_path = os.path.join(tmpdir, "edit.txt")
+            write_file(file_path, "Some content")
+
+            result = edit_file(file_path, "nonexistent", "replacement")
+            assert "Error" in result
+            assert "not found" in result.lower()
