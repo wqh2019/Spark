@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spark Agent</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔥 Spark Agent</h1>
+        </header>
+
+        <main id="chat-container">
+            <div id="messages"></div>
+        </main>
+
+        <footer>
+            <form id="chat-form">
+                <input
+                    type="text"
+                    id="message-input"
+                    placeholder="输入消息..."
+                    autocomplete="off"
+                    disabled
+                >
+                <button type="submit" id="send-btn" disabled>发送</button>
+            </form>
+        </footer>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
