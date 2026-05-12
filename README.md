@@ -153,6 +153,40 @@ def my_tool(param: str, optional: int = 0) -> str:
 - 容器类型：`list[T]`, `dict[K, V]`
 - 可选类型：`Optional[T]`
 
+## Web Chat UI
+
+Spark 内置了一个 Web 聊天界面，支持流式对话和多轮对话。
+
+### 启动服务
+
+```bash
+# 1. 配置环境变量（复制并编辑 .env 文件）
+cp .env.example .env
+
+# 2. 安装依赖
+uv sync
+
+# 3. 启动服务
+uv run uvicorn spark.server.app:app --reload --port 8000
+
+# 或者使用内置脚本
+uv run spark-server
+```
+
+### 访问界面
+
+启动服务后，打开浏览器访问：
+
+```
+http://localhost:8000
+```
+
+### 功能特性
+
+- **流式响应**：Agent 输出实时推送，逐字显示
+- **多轮对话**：支持上下文保持的连续对话
+- **工具调用可视化**：展示 Agent 调用的工具及结果
+
 ## 开发
 
 ```bash
@@ -160,16 +194,11 @@ def my_tool(param: str, optional: int = 0) -> str:
 git clone https://github.com/wqh2019/Spark.git
 cd Spark
 
-# 创建虚拟环境
-python -m venv .venv
-source .venv/bin/activate  # Linux/macOS
-# .venv\Scripts\activate  # Windows
-
 # 安装依赖
-pip install -e ".[dev]"
+uv sync
 
 # 运行测试
-pytest
+uv run pytest
 ```
 
 ## 许可证
