@@ -2,7 +2,7 @@
 import os
 import tempfile
 import pytest
-from spark.tools.file import read_file
+from spark.tools.file import read_file, write_file
 
 
 class TestReadFile:
@@ -57,3 +57,37 @@ class TestReadFile:
         result = read_file(tempfile.gettempdir())
         assert result.startswith("Error:")
         assert "directory" in result.lower() or "not a file" in result.lower()
+
+
+class TestWriteFile:
+    def test_write_file_create(self):
+        """Should create a new file and write content."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            file_path = os.path.join(tmpdir, "new_file.txt")
+            result = write_file(file_path, "Hello, World!")
+
+            assert result.startswith("Success") or result == "Success" or "wrote" in result.lower()
+            assert os.path.exists(file_path)
+
+            with open(file_path, 'r') as f:
+                assert f.read() == "Hello, World!"
+
+    def test_write_file_overwrite(self):
+        """Should overwrite existing file."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            file_path = os.path.join(tmpdir, "existing.txt")
+            write_file(file_path, "Original content")
+            result = write_file(file_path, "New content")
+
+            with open(file_path, 'r') as f:
+                assert f.read() == "New content"
+
+    def test_write_file_create_directories(self):
+        """Should create parent directories if they don't exist."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            file_path = os.path.join(tmpdir, "subdir", "nested", "file.txt")
+            result = write_file(file_path, "Nested content")
+
+            assert os.path.exists(file_path)
+            with open(file_path, 'r') as f:
+                assert f.read() == "Nested content"

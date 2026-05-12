@@ -46,3 +46,32 @@ def read_file(file_path: str, offset: int = 0, limit: int = 2000) -> str:
         return f"Error: Permission denied: {file_path}"
     except Exception as e:
         return f"Error: {str(e)}"
+
+
+@tool
+def write_file(file_path: str, content: str) -> str:
+    """
+    Write content to a file, creating it if it doesn't exist.
+
+    Args:
+        file_path: Absolute or relative path to the file
+        content: Content to write to the file
+
+    Returns:
+        Success message or error message
+    """
+    path = Path(file_path)
+
+    try:
+        # Create parent directories if needed
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(content)
+
+        return f"Successfully wrote {len(content)} characters to {file_path}"
+
+    except PermissionError:
+        return f"Error: Permission denied: {file_path}"
+    except Exception as e:
+        return f"Error: {str(e)}"
