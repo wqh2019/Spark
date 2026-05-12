@@ -18,6 +18,10 @@ class Tool:
         """Execute the tool."""
         return self.func(*args, **kwargs)
 
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        """Make the tool directly callable."""
+        return self.run(*args, **kwargs)
+
 
 def tool(func: Callable) -> Tool:
     """
