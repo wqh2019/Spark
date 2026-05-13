@@ -8,6 +8,7 @@ import io
 from dotenv import load_dotenv
 
 from spark import Agent, tool
+from spark.tools import get_all_tools
 
 # Fix Windows encoding
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
@@ -35,7 +36,9 @@ def calculate(expression: str) -> str:
 
 
 async def main():
-    agent = Agent(tools=[get_weather, calculate])
+    # Load all built-in tools (file, search, shell) + custom tools
+    all_tools = get_all_tools() + [get_weather, calculate]
+    agent = Agent(tools=all_tools)
 
     print("Agent 已启动，输入 'quit' 退出\n")
 

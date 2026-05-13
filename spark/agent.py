@@ -59,6 +59,7 @@ class Agent:
         self._api_key = api_key
         self._base_url = base_url
         self._client: AsyncOpenAI | None = None
+        self._tool_schema: list[dict] | None = None  # Cached tool schema
 
     @property
     def client(self) -> AsyncOpenAI:
@@ -100,8 +101,14 @@ class Agent:
 
             messages.append(assistant_msg.model_dump())
 
-            for tool_call in assistant_msg.tool_calls:
-                result = await self._execute_tool(tool_call)
+            # Execute all tools in parallel
+            tool_calls = assistant_msg.tool_calls
+            results = await asyncio.gather(*[
+                self._execute_tool(tc) for tc in tool_calls
+            ])
+
+            # Add results to messages in order
+            for tool_call, result in zip(tool_calls, results):
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tool_call.id,
@@ -214,14 +221,17 @@ class Agent:
 
                     full_messages.append(assistant_msg)
 
-                    # Execute each tool and add results
-                    for idx in sorted(tool_calls_data.keys()):
+                    # Execute all tools in parallel
+                    sorted_indices = sorted(tool_calls_data.keys())
+                    tool_call_objs = [_SimpleToolCall(tool_calls_data[idx]) for idx in sorted_indices]
+                    results = await asyncio.gather(*[
+                        self._execute_tool(tc) for tc in tool_call_objs
+                    ])
+
+                    # Yield results and add to messages in order
+                    for idx, result in zip(sorted_indices, results):
                         tc_data = tool_calls_data[idx]
                         tool_name = tc_data["name"]
-
-                        # Create a simple tool call object for _execute_tool
-                        tool_call_obj = _SimpleToolCall(tc_data)
-                        result = await self._execute_tool(tool_call_obj)
 
                         yield {
                             "type": "tool_result",
@@ -305,16 +315,19 @@ class Agent:
 
     def _build_tool_schema(self) -> list[dict] | None:
         """
-        Build the tools parameter for OpenAI API.
+        Build the tools parameter for OpenAI API (cached).
 
         Returns:
             List of tool schemas or None if no tools
         """
         if not self.tools:
             return None
-        return build_tool_schema(self.tools)
+        if self._tool_schema is None:
+            self._tool_schema = build_tool_schema(self.tools)
+        return self._tool_schema
 
     def add_tool(self, tool: Tool) -> None:
         """Add a tool to the agent."""
         self.tools.append(tool)
         self._tool_map[tool.name] = tool
+        self._tool_schema = None  # Invalidate cache
