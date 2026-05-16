@@ -234,3 +234,27 @@ class TestExecuteTool:
 
         result = await agent._execute_tool(mock_tool_call)
         assert "Error executing" in result
+
+
+def test_agent_with_logger():
+    """Test that agent accepts and uses logger."""
+    import tempfile
+    from pathlib import Path
+    from spark.logging import AgentLogger
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        logger = AgentLogger(
+            log_dir=Path(tmpdir),
+            enable_console=False,
+            enable_file=True,
+        )
+
+        @tool
+        def echo(text: str) -> str:
+            """Echo the input text."""
+            return text
+
+        agent = Agent(model="gpt-4", tools=[echo], logger=logger)
+
+        # Logger should be attached
+        assert agent.logger is logger

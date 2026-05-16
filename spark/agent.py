@@ -40,6 +40,7 @@ class Agent:
         system_prompt: System prompt for the agent. Falls back to DEFAULT_SYSTEM_PROMPT.
         api_key: OpenAI API key. Falls back to OPENAI_API_KEY env var.
         base_url: API base URL. Falls back to OPENAI_BASE_URL env var.
+        logger: Optional logger instance (e.g., AgentLogger) for tracing agent operations.
     """
 
     def __init__(
@@ -49,11 +50,13 @@ class Agent:
         system_prompt: str | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
+        logger: Any | None = None,
     ):
         self.model = model or os.getenv("OPENAI_MODEL", "gpt-4")
         self.tools = tools or []
         self.system_prompt = system_prompt or DEFAULT_SYSTEM_PROMPT
         self._tool_map = {t.name: t for t in self.tools}
+        self.logger = logger
 
         # Store config for lazy client initialization
         self._api_key = api_key
