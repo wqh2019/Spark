@@ -4,6 +4,7 @@ import json
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from spark import Agent
+from spark.logging import AgentLogger
 from spark.server.session import SessionManager
 
 router = APIRouter()
@@ -31,7 +32,10 @@ def create_agent() -> Agent:
         except Exception as e:
             return f"Error: {e}"
 
-    return Agent(tools=[get_weather, calculate])
+    # Create logger with console output and file logging
+    logger = AgentLogger(enable_console=True, enable_file=True)
+
+    return Agent(tools=[get_weather, calculate], logger=logger)
 
 
 @router.websocket("/ws/{session_id}")
