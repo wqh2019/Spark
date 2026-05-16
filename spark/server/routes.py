@@ -38,6 +38,32 @@ def create_agent() -> Agent:
     return Agent(tools=[get_weather, calculate], logger=logger)
 
 
+# ── Session REST API ───────────────────────────────────────────────
+
+
+@router.get("/api/sessions")
+async def list_sessions():
+    """List recent sessions sorted by last update time."""
+    return {"sessions": session_manager.list_sessions()}
+
+
+@router.get("/api/sessions/{session_id}/history")
+async def get_session_history(session_id: str):
+    """Get conversation history for a session."""
+    history = session_manager.get_history(session_id)
+    return {"session_id": session_id, "messages": history}
+
+
+@router.delete("/api/sessions/{session_id}")
+async def delete_session(session_id: str):
+    """Delete a session."""
+    session_manager.delete(session_id)
+    return {"ok": True}
+
+
+# ── WebSocket ──────────────────────────────────────────────────────
+
+
 @router.websocket("/ws/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
     """
