@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from spark.server.routes import router
+from spark.server.admin_routes import router as admin_router
 
 app = FastAPI(
     title="Spark Agent",
@@ -22,10 +23,10 @@ app = FastAPI(
 # Include WebSocket routes
 app.include_router(router)
 
-# Mount static files
+# Include admin API routes
+app.include_router(admin_router)
+
 STATIC_DIR = Path(__file__).parent / "static"
-if STATIC_DIR.exists():
-    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
 @app.get("/")
@@ -35,6 +36,20 @@ async def index():
     if index_path.exists():
         return FileResponse(str(index_path))
     return {"error": "index.html not found"}
+
+
+@app.get("/admin")
+async def admin_dashboard():
+    """Serve the admin dashboard."""
+    admin_path = STATIC_DIR / "admin.html"
+    if admin_path.exists():
+        return FileResponse(str(admin_path))
+    return {"error": "admin.html not found"}
+
+
+# Mount static files (must be after route registrations)
+if STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
 def run():

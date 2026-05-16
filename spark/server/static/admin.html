@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spark Admin</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            height: 100vh;
+            display: flex;
+        }
+
+        .app { display: flex; width: 100%; height: 100vh; }
+
+        /* Sidebar */
+        .sidebar {
+            width: 200px;
+            background: #2c3e50;
+            color: white;
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+        }
+
+        .sidebar h1 {
+            padding: 16px 20px;
+            font-size: 1.3rem;
+            font-weight: 500;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .sidebar nav { flex: 1; padding: 8px 0; }
+
+        .sidebar a {
+            display: block;
+            padding: 12px 20px;
+            color: rgba(255,255,255,0.7);
+            text-decoration: none;
+            font-size: 0.9rem;
+            transition: all 0.2s;
+        }
+
+        .sidebar a:hover { background: rgba(255,255,255,0.1); color: white; }
+        .sidebar a.active { background: rgba(255,255,255,0.15); color: white; border-left: 3px solid #3498db; }
+
+        .sidebar .bottom { padding: 16px 20px; border-top: 1px solid rgba(255,255,255,0.1); }
+        .sidebar .bottom a { padding: 8px 0; color: rgba(255,255,255,0.5); font-size: 0.85rem; }
+
+        /* Main content */
+        .main {
+            flex: 1;
+            overflow-y: auto;
+            padding: 24px 32px;
+        }
+
+        .main h2 {
+            font-size: 1.5rem;
+            margin-bottom: 20px;
+            color: #2c3e50;
+        }
+
+        /* Cards */
+        .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+
+        .card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .card .label { font-size: 0.8rem; color: #7f8c8d; text-transform: uppercase; letter-spacing: 0.5px; }
+        .card .value { font-size: 1.8rem; font-weight: 600; color: #2c3e50; margin-top: 4px; }
+        .card .sub { font-size: 0.8rem; color: #95a5a6; margin-top: 4px; }
+
+        /* Tables */
+        .table-wrap { background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); overflow: hidden; margin-bottom: 16px; }
+
+        table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+
+        th {
+            background: #f8f9fa;
+            padding: 10px 12px;
+            text-align: left;
+            font-weight: 600;
+            color: #495057;
+            border-bottom: 2px solid #dee2e6;
+            white-space: nowrap;
+        }
+
+        td { padding: 10px 12px; border-bottom: 1px solid #f1f1f1; color: #333; }
+        tr:hover td { background: #f8f9fa; }
+
+        .tag {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 0.75rem;
+            margin: 1px 2px;
+        }
+
+        .tag-model { background: #e8f4fd; color: #2980b9; }
+        .tag-tool { background: #fef9e7; color: #f39c12; }
+        .tag-error { background: #fdedec; color: #e74c3c; }
+        .tag-ok { background: #eafaf1; color: #27ae60; }
+
+        /* Filters */
+        .filters {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-bottom: 16px;
+            align-items: center;
+        }
+
+        .filters select, .filters input {
+            padding: 6px 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            background: white;
+        }
+
+        .filters label { font-size: 0.85rem; color: #666; display: flex; align-items: center; gap: 4px; }
+
+        /* Buttons */
+        .btn {
+            padding: 6px 14px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: background 0.2s;
+        }
+
+        .btn-primary { background: #3498db; color: white; }
+        .btn-primary:hover { background: #2980b9; }
+        .btn-outline { background: white; border: 1px solid #ddd; color: #333; }
+        .btn-outline:hover { background: #f5f5f5; }
+        .btn-danger { background: #e74c3c; color: white; }
+        .btn-danger:hover { background: #c0392b; }
+
+        /* Pagination */
+        .pagination { display: flex; gap: 4px; align-items: center; justify-content: center; margin-top: 16px; }
+        .pagination .btn { min-width: 36px; text-align: center; }
+        .pagination .btn.active { background: #3498db; color: white; }
+        .pagination .info { font-size: 0.85rem; color: #666; margin: 0 8px; }
+
+        /* Trace detail */
+        .trace-detail { margin-top: 16px; }
+        .event-item {
+            padding: 8px 12px;
+            border-left: 3px solid #ddd;
+            margin-left: 12px;
+            margin-bottom: 4px;
+            background: #fafafa;
+            font-size: 0.82rem;
+        }
+        .event-item.llm_start { border-left-color: #3498db; }
+        .event-item.llm_end { border-left-color: #27ae60; }
+        .event-item.tool_start { border-left-color: #f39c12; }
+        .event-item.tool_end { border-left-color: #f39c12; }
+        .event-item.trace_summary { border-left-color: #9b59b6; }
+        .event-time { color: #999; margin-right: 8px; }
+
+        /* Chart */
+        .chart-wrap { background: white; border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 16px; }
+        .chart-wrap canvas { max-height: 300px; }
+
+        /* Realtime */
+        .realtime-controls { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; }
+        .realtime-status { font-size: 0.85rem; }
+        .realtime-status.connected { color: #27ae60; }
+        .realtime-status.disconnected { color: #e74c3c; }
+
+        .event-log {
+            background: #1a1a2e;
+            color: #a8e6cf;
+            border-radius: 8px;
+            padding: 16px;
+            max-height: calc(100vh - 220px);
+            overflow-y: auto;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.8rem;
+            line-height: 1.6;
+        }
+
+        .event-log .line { padding: 2px 0; }
+        .event-log .time { color: #6c7a89; }
+        .event-log .type { font-weight: 600; }
+        .event-log .type.llm_start { color: #5dade2; }
+        .event-log .type.llm_end { color: #58d68d; }
+        .event-log .type.tool_start { color: #f4d03f; }
+        .event-log .type.tool_end { color: #f4d03f; }
+        .event-log .type.trace_summary { color: #bb8fce; }
+
+        .empty { text-align: center; padding: 40px; color: #999; font-size: 0.9rem; }
+    </style>
+</head>
+<body>
+    <div id="app" class="app">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <h1>🔥 Spark Admin</h1>
+            <nav>
+                <a href="#overview" :class="{ active: view === 'overview' }" @click.prevent="view='overview'">概览</a>
+                <a href="#traces" :class="{ active: view === 'traces' }" @click.prevent="view='traces'">链路日志</a>
+                <a href="#tokens" :class="{ active: view === 'tokens' }" @click.prevent="view='tokens'">Token 用量</a>
+                <a href="#realtime" :class="{ active: view === 'realtime' }" @click.prevent="view='realtime'">实时日志</a>
+            </nav>
+            <div class="bottom">
+                <a href="/">← 返回聊天</a>
+            </div>
+        </div>
+
+        <!-- Main content -->
+        <div class="main">
+            <!-- Overview -->
+            <template v-if="view === 'overview'">
+                <h2>概览</h2>
+                <div class="cards">
+                    <div class="card">
+                        <div class="label">总 Trace 数</div>
+                        <div class="value">{{ overview.trace_count }}</div>
+                    </div>
+                    <div class="card">
+                        <div class="label">总 Token 数</div>
+                        <div class="value">{{ formatNum(overview.total_tokens) }}</div>
+                        <div class="sub">Prompt: {{ formatNum(overview.total_prompt_tokens) }} / Completion: {{ formatNum(overview.total_completion_tokens) }}</div>
+                    </div>
+                    <div class="card">
+                        <div class="label">模型数</div>
+                        <div class="value">{{ (overview.models || []).length }}</div>
+                    </div>
+                    <div class="card">
+                        <div class="label">日志天数</div>
+                        <div class="value">{{ (overview.dates || []).length }}</div>
+                    </div>
+                </div>
+                <h2 style="font-size:1.1rem;">最近 Traces</h2>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr><th>Trace ID</th><th>开始时间</th><th>耗时</th><th>Token</th><th>模型</th><th>状态</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="t in overview.recent_traces || []" :key="t.trace_id">
+                                <td style="font-family:monospace;font-size:0.8rem;">{{ t.trace_id }}</td>
+                                <td>{{ formatTime(t.started_at) }}</td>
+                                <td>{{ t.duration_ms ? t.duration_ms + 'ms' : '-' }}</td>
+                                <td>{{ t.total_prompt_tokens + t.total_completion_tokens }}</td>
+                                <td><span class="tag tag-model" v-for="m in t.models" :key="m">{{ m }}</span></td>
+                                <td><span :class="['tag', t.has_errors ? 'tag-error' : 'tag-ok']">{{ t.has_errors ? 'Error' : 'OK' }}</span></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </template>
+
+            <!-- Traces -->
+            <template v-if="view === 'traces'">
+                <h2>链路日志</h2>
+                <div class="filters">
+                    <label>模型 <select v-model="tracesFilter.model"><option value="">全部</option><option v-for="m in models" :key="m" :value="m">{{ m }}</option></select></label>
+                    <label>日期从 <input type="date" v-model="tracesFilter.date_from"></label>
+                    <label>到 <input type="date" v-model="tracesFilter.date_to"></label>
+                    <label><input type="checkbox" v-model="tracesFilter.has_errors"> 仅错误</label>
+                    <button class="btn btn-primary" @click="fetchTraces(1)">筛选</button>
+                    <button class="btn btn-outline" @click="exportTraces('json')">导出 JSON</button>
+                    <button class="btn btn-outline" @click="exportTraces('csv')">导出 CSV</button>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr><th>Trace ID</th><th>开始时间</th><th>耗时</th><th>Prompt</th><th>Completion</th><th>模型</th><th>工具</th><th>状态</th></tr>
+                        </thead>
+                        <tbody>
+                            <template v-for="t in traces" :key="t.trace_id">
+                                <tr @click="toggleTrace(t.trace_id)" style="cursor:pointer;">
+                                    <td style="font-family:monospace;font-size:0.8rem;">{{ t.trace_id }} ▸</td>
+                                    <td>{{ formatTime(t.started_at) }}</td>
+                                    <td>{{ t.duration_ms ? t.duration_ms + 'ms' : '-' }}</td>
+                                    <td>{{ t.total_prompt_tokens }}</td>
+                                    <td>{{ t.total_completion_tokens }}</td>
+                                    <td><span class="tag tag-model" v-for="m in t.models" :key="m">{{ m }}</span></td>
+                                    <td><span class="tag tag-tool" v-for="tool in t.tools_used" :key="tool">{{ tool }}</span></td>
+                                    <td><span :class="['tag', t.has_errors ? 'tag-error' : 'tag-ok']">{{ t.has_errors ? 'Error' : 'OK' }}</span></td>
+                                </tr>
+                                <tr v-if="expandedTrace === t.trace_id">
+                                    <td colspan="8" class="trace-detail">
+                                        <div v-if="traceDetailLoading" class="empty">加载中...</div>
+                                        <div v-else-if="traceDetail">
+                                            <div v-for="e in traceDetail.events" :key="e.step + '-' + e.event_type" :class="['event-item', e.event_type]">
+                                                <span class="event-time">{{ formatTime(e.timestamp) }}</span>
+                                                <strong>Step {{ e.step }}</strong>
+                                                <span :class="['tag', 'tag-' + (e.event_type === 'trace_summary' ? 'model' : (e.event_type.includes('llm') ? 'model' : 'tool'))]">{{ e.event_type }}</span>
+                                                <span v-if="e.model"> → {{ e.model }}</span>
+                                                <span v-if="e.tool_name"> 🔧 {{ e.tool_name }}</span>
+                                                <span v-if="e.prompt_tokens != null"> [{{ e.prompt_tokens }}+{{ e.completion_tokens }} tokens]</span>
+                                                <span v-if="e.duration_ms"> {{ e.duration_ms }}ms</span>
+                                                <span v-if="e.error" style="color:#e74c3c;"> ❌ {{ e.error }}</span>
+                                            </div>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="pagination" v-if="tracesTotal > 0">
+                    <button class="btn btn-outline" :disabled="tracesPage <= 1" @click="fetchTraces(tracesPage - 1)">上一页</button>
+                    <span class="info">{{ tracesPage }} / {{ Math.ceil(tracesTotal / tracesPageSize) }} (共 {{ tracesTotal }} 条)</span>
+                    <button class="btn btn-outline" :disabled="tracesPage * tracesPageSize >= tracesTotal" @click="fetchTraces(tracesPage + 1)">下一页</button>
+                </div>
+            </template>
+
+            <!-- Token Usage -->
+            <template v-if="view === 'tokens'">
+                <h2>Token 用量</h2>
+                <div class="filters">
+                    <label>模型 <select v-model="tokenFilter.model"><option value="">全部</option><option v-for="m in models" :key="m" :value="m">{{ m }}</option></select></label>
+                    <label>日期从 <input type="date" v-model="tokenFilter.date_from"></label>
+                    <label>到 <input type="date" v-model="tokenFilter.date_to"></label>
+                    <button class="btn btn-primary" @click="fetchTokenUsage(); fetchTrend()">刷新</button>
+                </div>
+                <div class="cards">
+                    <div class="card"><div class="label">Prompt Tokens</div><div class="value">{{ formatNum(tokenUsage.total_prompt) }}</div></div>
+                    <div class="card"><div class="label">Completion Tokens</div><div class="value">{{ formatNum(tokenUsage.total_completion) }}</div></div>
+                    <div class="card"><div class="label">Total Tokens</div><div class="value">{{ formatNum(tokenUsage.total_tokens) }}</div></div>
+                    <div class="card"><div class="label">Trace 数</div><div class="value">{{ tokenUsage.trace_count }}</div></div>
+                </div>
+                <div class="table-wrap" v-if="Object.keys(tokenUsage.by_model || {}).length">
+                    <table>
+                        <thead><tr><th>模型</th><th>Prompt</th><th>Completion</th><th>Total</th></tr></thead>
+                        <tbody>
+                            <tr v-for="(usage, model) in tokenUsage.by_model" :key="model">
+                                <td>{{ model }}</td>
+                                <td>{{ usage.prompt }}</td>
+                                <td>{{ usage.completion }}</td>
+                                <td>{{ usage.prompt + usage.completion }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="chart-wrap">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                        <strong>时序趋势</strong>
+                        <div>
+                            <button :class="['btn', trendGranularity==='hour'?'btn-primary':'btn-outline']" @click="trendGranularity='hour'; fetchTrend()">按小时</button>
+                            <button :class="['btn', trendGranularity==='day'?'btn-primary':'btn-outline']" @click="trendGranularity='day'; fetchTrend()">按天</button>
+                        </div>
+                    </div>
+                    <canvas id="trendChart"></canvas>
+                </div>
+            </template>
+
+            <!-- Realtime -->
+            <template v-if="view === 'realtime'">
+                <h2>实时日志</h2>
+                <div class="realtime-controls">
+                    <button class="btn" :class="realtimePaused ? 'btn-primary' : 'btn-danger'" @click="toggleRealtime">
+                        {{ realtimePaused ? '恢复' : '暂停' }}
+                    </button>
+                    <span :class="['realtime-status', sseConnected ? 'connected' : 'disconnected']">
+                        {{ sseConnected ? '● 已连接' : '○ 未连接' }}
+                    </span>
+                    <label style="margin-left:auto;font-size:0.85rem;color:#666;">
+                        筛选 <select v-model="realtimeFilter" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;">
+                            <option value="">全部</option>
+                            <option value="llm_start">llm_start</option>
+                            <option value="llm_end">llm_end</option>
+                            <option value="tool_start">tool_start</option>
+                            <option value="tool_end">tool_end</option>
+                            <option value="trace_summary">trace_summary</option>
+                        </select>
+                    </label>
+                    <button class="btn btn-outline" @click="realtimeEvents=[]">清空</button>
+                </div>
+                <div class="event-log" ref="eventLog">
+                    <div v-if="realtimeEvents.length === 0" class="empty" style="color:#6c7a89;">等待日志事件...</div>
+                    <div v-for="(e, i) in filteredRealtimeEvents" :key="i" class="line">
+                        <span class="time">{{ formatTime(e.timestamp) }}</span>
+                        <span :class="['type', e.event_type]">{{ e.event_type }}</span>
+                        <span v-if="e.trace_id"> [{{ e.trace_id }}]</span>
+                        <span v-if="e.model"> → {{ e.model }}</span>
+                        <span v-if="e.tool_name"> 🔧 {{ e.tool_name }}</span>
+                        <span v-if="e.prompt_tokens != null"> [{{ e.prompt_tokens }}+{{ e.completion_tokens }}]</span>
+                        <span v-if="e.duration_ms"> {{ e.duration_ms }}ms</span>
+                        <span v-if="e.error" style="color:#e74c3c;"> ❌ {{ e.error }}</span>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </div>
+
+    <script>
+    const { createApp, ref, computed, watch, onMounted, onUnmounted, nextTick } = Vue;
+
+    createApp({
+        setup() {
+            const view = ref('overview');
+            const models = ref([]);
+
+            // ── Overview ──
+            const overview = ref({ trace_count: 0, total_tokens: 0, total_prompt_tokens: 0, total_completion_tokens: 0, models: [], dates: [], recent_traces: [] });
+
+            async function fetchOverview() {
+                try {
+                    const r = await fetch('/api/overview');
+                    overview.value = await r.json();
+                    models.value = overview.value.models || [];
+                } catch (e) { console.error('fetchOverview', e); }
+            }
+
+            // ── Traces ──
+            const traces = ref([]);
+            const tracesTotal = ref(0);
+            const tracesPage = ref(1);
+            const tracesPageSize = 20;
+            const tracesFilter = ref({ model: '', date_from: '', date_to: '', has_errors: false });
+            const expandedTrace = ref(null);
+            const traceDetail = ref(null);
+            const traceDetailLoading = ref(false);
+
+            async function fetchTraces(page) {
+                tracesPage.value = page;
+                const f = tracesFilter.value;
+                const params = new URLSearchParams({ page, page_size: tracesPageSize });
+                if (f.model) params.set('model', f.model);
+                if (f.date_from) params.set('date_from', f.date_from);
+                if (f.date_to) params.set('date_to', f.date_to);
+                if (f.has_errors) params.set('has_errors', 'true');
+                try {
+                    const r = await fetch('/api/traces?' + params);
+                    const data = await r.json();
+                    traces.value = data.traces;
+                    tracesTotal.value = data.total;
+                } catch (e) { console.error('fetchTraces', e); }
+            }
+
+            async function toggleTrace(tid) {
+                if (expandedTrace.value === tid) {
+                    expandedTrace.value = null;
+                    return;
+                }
+                expandedTrace.value = tid;
+                traceDetailLoading.value = true;
+                try {
+                    const r = await fetch('/api/traces/' + tid);
+                    traceDetail.value = await r.json();
+                } catch (e) { console.error('toggleTrace', e); }
+                traceDetailLoading.value = false;
+            }
+
+            function exportTraces(format) {
+                const f = tracesFilter.value;
+                const params = new URLSearchParams({ format });
+                if (f.model) params.set('model', f.model);
+                if (f.date_from) params.set('date_from', f.date_from);
+                if (f.date_to) params.set('date_to', f.date_to);
+                window.open('/api/export?' + params, '_blank');
+            }
+
+            // ── Token Usage ──
+            const tokenUsage = ref({ total_prompt: 0, total_completion: 0, total_tokens: 0, by_model: {}, trace_count: 0 });
+            const tokenFilter = ref({ model: '', date_from: '', date_to: '' });
+            const trendGranularity = ref('hour');
+            const trendData = ref([]);
+            let trendChart = null;
+
+            async function fetchTokenUsage() {
+                const f = tokenFilter.value;
+                const params = new URLSearchParams();
+                if (f.model) params.set('model', f.model);
+                if (f.date_from) params.set('date_from', f.date_from);
+                if (f.date_to) params.set('date_to', f.date_to);
+                try {
+                    const r = await fetch('/api/token-usage?' + params);
+                    tokenUsage.value = await r.json();
+                } catch (e) { console.error('fetchTokenUsage', e); }
+            }
+
+            async function fetchTrend() {
+                const f = tokenFilter.value;
+                const params = new URLSearchParams({ granularity: trendGranularity.value });
+                if (f.model) params.set('model', f.model);
+                if (f.date_from) params.set('date_from', f.date_from);
+                if (f.date_to) params.set('date_to', f.date_to);
+                try {
+                    const r = await fetch('/api/token-usage/trend?' + params);
+                    const data = await r.json();
+                    trendData.value = data.trend || [];
+                    renderChart();
+                } catch (e) { console.error('fetchTrend', e); }
+            }
+
+            function renderChart() {
+                const canvas = document.getElementById('trendChart');
+                if (!canvas) return;
+                if (trendChart) trendChart.destroy();
+
+                const labels = trendData.value.map(p => p.timestamp);
+                trendChart = new Chart(canvas, {
+                    type: 'line',
+                    data: {
+                        labels,
+                        datasets: [
+                            { label: 'Prompt', data: trendData.value.map(p => p.prompt_tokens), borderColor: '#3498db', backgroundColor: 'rgba(52,152,219,0.1)', fill: true, tension: 0.3 },
+                            { label: 'Completion', data: trendData.value.map(p => p.completion_tokens), borderColor: '#27ae60', backgroundColor: 'rgba(39,174,96,0.1)', fill: true, tension: 0.3 },
+                        ],
+                    },
+                    options: {
+                        responsive: true,
+                        scales: { y: { beginAtZero: true } },
+                        plugins: { legend: { position: 'top' } },
+                    },
+                });
+            }
+
+            // ── Realtime ──
+            const realtimeEvents = ref([]);
+            const realtimePaused = ref(false);
+            const realtimeFilter = ref('');
+            const sseConnected = ref(false);
+            let eventSource = null;
+
+            const filteredRealtimeEvents = computed(() => {
+                if (!realtimeFilter.value) return realtimeEvents.value;
+                return realtimeEvents.value.filter(e => e.event_type === realtimeFilter.value);
+            });
+
+            const eventLog = ref(null);
+
+            function connectSSE() {
+                if (eventSource) eventSource.close();
+                eventSource = new EventSource('/api/stream');
+                sseConnected.value = true;
+                eventSource.onmessage = (e) => {
+                    if (realtimePaused.value) return;
+                    try {
+                        const record = JSON.parse(e.data);
+                        realtimeEvents.value.push(record);
+                        if (realtimeEvents.value.length > 500) {
+                            realtimeEvents.value = realtimeEvents.value.slice(-500);
+                        }
+                        nextTick(() => {
+                            const el = eventLog.value;
+                            if (el) el.scrollTop = el.scrollHeight;
+                        });
+                    } catch (err) { /* ignore */ }
+                };
+                eventSource.onerror = () => {
+                    sseConnected.value = false;
+                    eventSource.close();
+                    // Reconnect after 3s
+                    setTimeout(connectSSE, 3000);
+                };
+            }
+
+            function toggleRealtime() {
+                realtimePaused.value = !realtimePaused.value;
+            }
+
+            // ── Helpers ──
+            function formatTime(ts) {
+                if (!ts) return '-';
+                try {
+                    const d = new Date(ts);
+                    return d.toLocaleString('zh-CN', { hour12: false });
+                } catch { return ts; }
+            }
+
+            function formatNum(n) {
+                if (n == null) return '0';
+                return n.toLocaleString();
+            }
+
+            // ── Lifecycle ──
+            onMounted(() => {
+                // Hash routing
+                const hash = location.hash.replace('#', '');
+                if (['overview', 'traces', 'tokens', 'realtime'].includes(hash)) {
+                    view.value = hash;
+                }
+                window.addEventListener('hashchange', () => {
+                    const h = location.hash.replace('#', '');
+                    if (['overview', 'traces', 'tokens', 'realtime'].includes(h)) view.value = h;
+                });
+
+                fetchOverview();
+                connectSSE();
+            });
+
+            // Load data when switching views
+            watch(view, (v) => {
+                location.hash = v;
+                if (v === 'overview') fetchOverview();
+                if (v === 'traces') fetchTraces(1);
+                if (v === 'tokens') { fetchTokenUsage(); fetchTrend(); }
+            });
+
+            onUnmounted(() => {
+                if (eventSource) eventSource.close();
+                if (trendChart) trendChart.destroy();
+            });
+
+            return {
+                view, models, overview,
+                traces, tracesTotal, tracesPage, tracesPageSize, tracesFilter,
+                expandedTrace, traceDetail, traceDetailLoading,
+                fetchTraces, toggleTrace, exportTraces,
+                tokenUsage, tokenFilter, trendGranularity,
+                fetchTokenUsage, fetchTrend,
+                realtimeEvents, realtimePaused, realtimeFilter,
+                sseConnected, filteredRealtimeEvents, eventLog,
+                toggleRealtime,
+                formatTime, formatNum,
+            };
+        },
+    }).mount('#app');
+    </script>
+</body>
+</html>

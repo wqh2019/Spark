@@ -65,14 +65,36 @@ class AgentLogger:
         return self._trace_id
 
     def end_trace(self) -> None:
-        """End the current trace."""
+        """End the current trace and write a summary record."""
+        if self._trace_id is not None and self._start_time is not None:
+            duration_ms = int((time.time() - self._start_time) * 1000)
+            record = TraceRecord(
+                trace_id=self._trace_id,
+                step=-1,
+                event_type="trace_summary",
+                timestamp=datetime.now(),
+                duration_ms=duration_ms,
+                prompt_tokens=self.token_usage.total_prompt,
+                completion_tokens=self.token_usage.total_completion,
+                by_model=self.token_usage.by_model if self.token_usage.by_model else None,
+            )
+            self.log(record)
         self._trace_id = None
         self._start_time = None
 
     def log(self, record: TraceRecord) -> None:
-        """Log a trace record to all handlers."""
+        """Log a trace record to all handlers and broadcast to admin clients."""
         for handler in self._handlers:
             handler.emit(record)
+        # Broadcast to admin SSE clients
+        try:
+            from spark.server.log_broadcaster import broadcaster
+            from spark.logging.formatters import JsonFormatter
+            import json
+            data = json.loads(JsonFormatter().format(record))
+            broadcaster.broadcast(data)
+        except Exception:
+            pass  # Don't let broadcast errors break logging
 
     def log_llm_start(self, step: int, model: str) -> None:
         """Log the start of an LLM call."""

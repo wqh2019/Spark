@@ -87,5 +87,7 @@ class JsonFormatter:
             data["tool_result"] = record.tool_result
         if record.error is not None:
             data["error"] = record.error
+        if record.by_model is not None:
+            data["by_model"] = record.by_model
 
         return json.dumps(data, ensure_ascii=False)

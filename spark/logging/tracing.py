@@ -27,6 +27,9 @@ class TraceRecord:
     # Error
     error: str | None = None
 
+    # Trace summary (trace_summary 事件使用)
+    by_model: dict[str, dict[str, int]] | None = None
+
 
 @dataclass
 class TokenUsage:
