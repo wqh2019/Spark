@@ -178,8 +178,17 @@ class Agent:
             {"role": "user", "content": message},
         ]
 
+        # Start trace
+        if self.logger:
+            self.logger.start_trace()
+
         for step in range(max_steps):
             try:
+                # Log LLM start
+                if self.logger:
+                    self.logger.log_llm_start(step=step, model=self.model)
+
+                start_time = time.time()
                 stream = await self.client.chat.completions.create(
                     model=self.model,
                     messages=full_messages,
@@ -214,6 +223,17 @@ class Agent:
                                     tool_calls_data[idx]["name"] = tc.function.name
                                 if tc.function.arguments:
                                     tool_calls_data[idx]["arguments"] += tc.function.arguments
+
+                # Log LLM end (streaming doesn't provide token counts)
+                duration_ms = int((time.time() - start_time) * 1000)
+                if self.logger:
+                    self.logger.log_llm_end(
+                        step=step,
+                        model=self.model,
+                        prompt_tokens=0,
+                        completion_tokens=0,
+                        duration_ms=duration_ms,
+                    )
 
                 # Process tool calls if any
                 if tool_calls_data:
@@ -257,7 +277,7 @@ class Agent:
                     sorted_indices = sorted(tool_calls_data.keys())
                     tool_call_objs = [_SimpleToolCall(tool_calls_data[idx]) for idx in sorted_indices]
                     results = await asyncio.gather(*[
-                        self._execute_tool(tc) for tc in tool_call_objs
+                        self._execute_tool_with_logging(tc, step) for tc in tool_call_objs
                     ])
 
                     # Yield results and add to messages in order
@@ -281,14 +301,20 @@ class Agent:
                     continue
 
                 # No tool calls - we're done
+                if self.logger:
+                    self.logger.end_trace()
                 yield {"type": "done"}
                 return
 
             except Exception as e:
+                if self.logger:
+                    self.logger.end_trace()
                 yield {"type": "error", "message": str(e)}
                 return
 
         # Max steps reached
+        if self.logger:
+            self.logger.end_trace()
         yield {"type": "error", "message": "Reached maximum steps without completing the task."}
 
     def run(self, message: str, max_steps: int = 10) -> str:
