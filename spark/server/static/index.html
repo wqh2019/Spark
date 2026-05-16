@@ -203,6 +203,14 @@
             white-space: pre-wrap;
         }
 
+        .msg-time {
+            font-size: 0.7rem;
+            margin-top: 4px;
+            opacity: 0.5;
+        }
+
+        .message.user .msg-time { text-align: right; }
+
         .message.user {
             background: #3498db;
             color: white;
@@ -369,7 +377,10 @@
                 <div class="messages" ref="messagesEl">
                     <div v-if="messages.length === 0" class="empty-state">发送一条消息开始对话</div>
                     <template v-for="(msg, i) in messages" :key="i">
-                        <div v-if="msg.type === 'user'" class="message user">{{ msg.content }}</div>
+                        <div v-if="msg.type === 'user'" class="message user">
+                            {{ msg.content }}
+                            <div class="msg-time">{{ formatMsgTime(msg.time) }}</div>
+                        </div>
                         <div v-else-if="msg.type === 'system'" class="message system">{{ msg.content }}</div>
                         <div v-else-if="msg.type === 'assistant'" class="message assistant">
                             {{ msg.content }}
@@ -379,6 +390,7 @@
                                 <div class="tool-args">{{ tool.argsText }}</div>
                                 <div class="tool-result">{{ tool.result || '执行中...' }}</div>
                             </div>
+                            <div v-if="msg.time && !msg.typing" class="msg-time">{{ formatMsgTime(msg.time) }}</div>
                         </div>
                     </template>
                 </div>
@@ -473,9 +485,9 @@
                 const history = await loadHistory(sid);
                 for (const msg of history) {
                     if (msg.role === 'user') {
-                        messages.value.push({ type: 'user', content: msg.content });
+                        messages.value.push({ type: 'user', content: msg.content, time: msg.timestamp });
                     } else if (msg.role === 'assistant') {
-                        messages.value.push({ type: 'assistant', content: msg.content, tools: [], typing: false });
+                        messages.value.push({ type: 'assistant', content: msg.content, tools: [], typing: false, time: msg.timestamp });
                     }
                 }
                 scrollBottom();
@@ -575,7 +587,7 @@
             }
 
             function startAssistant() {
-                const msg = { type: 'assistant', content: '', tools: [], typing: true };
+                const msg = { type: 'assistant', content: '', tools: [], typing: true, time: new Date().toISOString() };
                 messages.value.push(msg);
                 currentAssistant = msg;
             }
@@ -584,7 +596,7 @@
                 const text = input.value.trim();
                 if (!text || !connected.value || sending.value) return;
 
-                messages.value.push({ type: 'user', content: text });
+                messages.value.push({ type: 'user', content: text, time: new Date().toISOString() });
                 input.value = '';
                 sending.value = true;
 
@@ -619,6 +631,21 @@
                 } catch { return ''; }
             }
 
+            function formatMsgTime(isoStr) {
+                if (!isoStr) return '';
+                try {
+                    const d = new Date(isoStr);
+                    if (isNaN(d.getTime())) return '';
+                    const now = new Date();
+                    const time = d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+                    if (d.toDateString() === now.toDateString()) return time;
+                    const yesterday = new Date(now);
+                    yesterday.setDate(yesterday.getDate() - 1);
+                    if (d.toDateString() === yesterday.toDateString()) return '昨天 ' + time;
+                    return d.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' }) + ' ' + time;
+                } catch { return ''; }
+            }
+
             // ── Lifecycle ──
 
             onMounted(async () => {
@@ -647,7 +674,7 @@
             return {
                 messages, input, connected, sending, sidebarOpen, messagesEl,
                 sessions, currentSessionId,
-                send, newChat, switchSession, deleteSession, formatTime,
+                send, newChat, switchSession, deleteSession, formatTime, formatMsgTime,
             };
         },
     }).mount('#app');

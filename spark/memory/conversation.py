@@ -24,7 +24,12 @@ class ConversationMemory:
             role: Message role (user, assistant, system, tool)
             content: Message content
         """
-        self._messages.append({"role": role, "content": content})
+        from datetime import datetime
+        self._messages.append({
+            "role": role,
+            "content": content,
+            "timestamp": datetime.now().isoformat(),
+        })
 
         # Trim old messages if exceeds limit
         if len(self._messages) > self.max_messages:
