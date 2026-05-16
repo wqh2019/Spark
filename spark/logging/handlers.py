@@ -1,6 +1,6 @@
 # spark/logging/handlers.py
 """Handlers for outputting trace records."""
-from datetime import datetime
+import time
 from pathlib import Path
 from typing import Protocol
 
@@ -53,7 +53,8 @@ class FileHandler:
             self._current_file = self.log_dir / f"spark-{date_str}.jsonl"
             self._cleanup_old_files()
 
-        assert self._current_file is not None
+        if self._current_file is None:
+            raise RuntimeError("Handler not properly initialized")
         with open(self._current_file, "a", encoding="utf-8") as f:
             f.write(self.formatter.format(record) + "\n")
 
@@ -67,7 +68,6 @@ class FileHandler:
         if self.retention_days <= 0:
             return
 
-        import time
         cutoff = time.time() - self.retention_days * 24 * 60 * 60
 
         for file in self.log_dir.glob("spark-*.jsonl"):
