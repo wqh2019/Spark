@@ -109,8 +109,12 @@ class Agent:
             duration_ms = int((time.time() - start_time) * 1000)
 
             # Extract token usage
-            prompt_tokens = getattr(response.usage, 'prompt_tokens', 0) if response.usage else 0
-            completion_tokens = getattr(response.usage, 'completion_tokens', 0) if response.usage else 0
+            if response.usage:
+                prompt_tokens = response.usage.prompt_tokens or 0
+                completion_tokens = response.usage.completion_tokens or 0
+            else:
+                prompt_tokens = 0
+                completion_tokens = 0
 
             # Log LLM end
             if self.logger:
@@ -194,13 +198,19 @@ class Agent:
                     messages=full_messages,
                     tools=self._build_tool_schema(),
                     stream=True,
+                    stream_options={"include_usage": True},
                 )
 
                 # Collect streaming response
                 content_chunks: list[str] = []
                 tool_calls_data: dict[int, dict] = {}  # index -> tool call data
+                stream_usage = None  # Track usage from stream
 
                 async for chunk in stream:
+                    # Check for usage info (usually in the last chunk)
+                    if chunk.usage:
+                        stream_usage = chunk.usage
+
                     delta = chunk.choices[0].delta
 
                     # Handle text content
@@ -224,14 +234,22 @@ class Agent:
                                 if tc.function.arguments:
                                     tool_calls_data[idx]["arguments"] += tc.function.arguments
 
-                # Log LLM end (streaming doesn't provide token counts)
+                # Extract token usage from stream
+                if stream_usage:
+                    prompt_tokens = getattr(stream_usage, 'prompt_tokens', 0) or 0
+                    completion_tokens = getattr(stream_usage, 'completion_tokens', 0) or 0
+                else:
+                    prompt_tokens = 0
+                    completion_tokens = 0
+
+                # Log LLM end
                 duration_ms = int((time.time() - start_time) * 1000)
                 if self.logger:
                     self.logger.log_llm_end(
                         step=step,
                         model=self.model,
-                        prompt_tokens=0,
-                        completion_tokens=0,
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
                         duration_ms=duration_ms,
                     )
 
