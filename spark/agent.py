@@ -5,6 +5,7 @@ Spark Agent - Core agent implementation with ReAct loop.
 import asyncio
 import json
 import os
+import time
 from typing import Any, AsyncGenerator
 
 from openai import AsyncOpenAI
@@ -90,16 +91,42 @@ class Agent:
             {"role": "user", "content": message},
         ]
 
+        # Start trace
+        if self.logger:
+            self.logger.start_trace()
+
         for step in range(max_steps):
+            # Log LLM start
+            if self.logger:
+                self.logger.log_llm_start(step=step, model=self.model)
+
+            start_time = time.time()
             response = await self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
                 tools=self._build_tool_schema(),
             )
+            duration_ms = int((time.time() - start_time) * 1000)
+
+            # Extract token usage
+            prompt_tokens = getattr(response.usage, 'prompt_tokens', 0) if response.usage else 0
+            completion_tokens = getattr(response.usage, 'completion_tokens', 0) if response.usage else 0
+
+            # Log LLM end
+            if self.logger:
+                self.logger.log_llm_end(
+                    step=step,
+                    model=self.model,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    duration_ms=duration_ms,
+                )
 
             assistant_msg = response.choices[0].message
 
             if not assistant_msg.tool_calls:
+                if self.logger:
+                    self.logger.end_trace()
                 return assistant_msg.content or ""
 
             messages.append(assistant_msg.model_dump())
@@ -107,7 +134,7 @@ class Agent:
             # Execute all tools in parallel
             tool_calls = assistant_msg.tool_calls
             results = await asyncio.gather(*[
-                self._execute_tool(tc) for tc in tool_calls
+                self._execute_tool_with_logging(tc, step) for tc in tool_calls
             ])
 
             # Add results to messages in order
@@ -118,6 +145,8 @@ class Agent:
                     "content": result,
                 })
 
+        if self.logger:
+            self.logger.end_trace()
         return "Error: Reached maximum steps without completing the task."
 
     async def arun_stream(
@@ -315,6 +344,66 @@ class Agent:
             return str(result)
         except Exception as e:
             return f"Error executing {tool_name}: {e}"
+
+    async def _execute_tool_with_logging(self, tool_call: Any, step: int) -> str:
+        """
+        Execute a tool call with logging.
+
+        Args:
+            tool_call: The tool call object from the LLM response
+            step: The current step number
+
+        Returns:
+            The tool execution result or error message
+        """
+        tool_name = tool_call.function.name
+
+        try:
+            tool_args = json.loads(tool_call.function.arguments)
+        except json.JSONDecodeError as e:
+            error_msg = f"Error: Invalid JSON arguments for tool '{tool_name}': {e}"
+            if self.logger:
+                self.logger.log_tool_end(step=step, tool_name=tool_name, error=error_msg)
+            return error_msg
+
+        if tool_name not in self._tool_map:
+            error_msg = f"Error: Tool '{tool_name}' not found"
+            if self.logger:
+                self.logger.log_tool_end(step=step, tool_name=tool_name, error=error_msg)
+            return error_msg
+
+        # Log tool start
+        if self.logger:
+            self.logger.log_tool_start(step=step, tool_name=tool_name, tool_args=tool_args)
+
+        start_time = time.time()
+        try:
+            tool = self._tool_map[tool_name]
+            result = tool.run(**tool_args)
+            if asyncio.iscoroutine(result):
+                result = await result
+            result_str = str(result)
+            duration_ms = int((time.time() - start_time) * 1000)
+
+            if self.logger:
+                self.logger.log_tool_end(
+                    step=step,
+                    tool_name=tool_name,
+                    tool_result=result_str[:500],  # Truncate for logging
+                    duration_ms=duration_ms,
+                )
+            return result_str
+        except Exception as e:
+            error_msg = f"Error executing {tool_name}: {e}"
+            duration_ms = int((time.time() - start_time) * 1000)
+            if self.logger:
+                self.logger.log_tool_end(
+                    step=step,
+                    tool_name=tool_name,
+                    error=error_msg,
+                    duration_ms=duration_ms,
+                )
+            return error_msg
 
     def _build_tool_schema(self) -> list[dict] | None:
         """
