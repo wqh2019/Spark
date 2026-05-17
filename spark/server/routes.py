@@ -1,6 +1,9 @@
 """HTTP and WebSocket routes."""
 
 import json
+import os
+from pathlib import Path
+
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from spark import Agent
@@ -9,8 +12,16 @@ from spark.server.session import SessionManager
 
 router = APIRouter()
 
-# Global session manager
-session_manager = SessionManager()
+# Global session manager with optional persistence
+_sessions_dir = None
+_sessions_dir_env = os.getenv("SPARK_SESSIONS_DIR")
+if _sessions_dir_env:
+    _sessions_dir = Path(_sessions_dir_env)
+else:
+    # Default to ~/.spark/sessions
+    _sessions_dir = Path.home() / ".spark" / "sessions"
+
+session_manager = SessionManager(sessions_dir=_sessions_dir)
 
 
 def create_agent() -> Agent:
