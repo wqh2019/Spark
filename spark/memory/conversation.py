@@ -48,6 +48,20 @@ class ConversationMemory:
         """Clear all messages from history."""
         self._messages.clear()
 
+    def set_messages(self, messages: list[dict]) -> None:
+        """
+        Set messages from an external source (e.g., loaded from disk).
+
+        Applies the sliding window if messages exceed max_messages.
+
+        Args:
+            messages: List of message dictionaries.
+        """
+        if len(messages) > self.max_messages:
+            self._messages = messages[-self.max_messages:]
+        else:
+            self._messages = list(messages)
+
     def __len__(self) -> int:
         """Return number of messages in history."""
         return len(self._messages)

@@ -51,3 +51,34 @@ class TestConversationMemory:
             {"role": "user", "content": "Hi"},
             {"role": "assistant", "content": "Hello!"},
         ]
+
+    def test_set_messages(self):
+        """Test setting messages from external source."""
+        memory = ConversationMemory(max_messages=10)
+
+        messages = [
+            {"role": "user", "content": "Hello", "timestamp": "2024-01-01T10:00:00"},
+            {"role": "assistant", "content": "Hi!", "timestamp": "2024-01-01T10:00:05"},
+        ]
+        memory.set_messages(messages)
+
+        loaded = memory.get_messages()
+        assert len(loaded) == 2
+        assert loaded[0]["content"] == "Hello"
+        assert loaded[1]["content"] == "Hi!"
+
+    def test_set_messages_respects_max_limit(self):
+        """Test that set_messages respects max_messages limit."""
+        memory = ConversationMemory(max_messages=3)
+
+        messages = [
+            {"role": "user", "content": f"Msg {i}", "timestamp": f"2024-01-01T10:0{i}:00"}
+            for i in range(5)
+        ]
+        memory.set_messages(messages)
+
+        loaded = memory.get_messages()
+        assert len(loaded) == 3
+        # Should keep the most recent messages
+        assert loaded[0]["content"] == "Msg 2"
+        assert loaded[2]["content"] == "Msg 4"
