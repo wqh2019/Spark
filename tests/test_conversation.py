@@ -17,8 +17,12 @@ class TestConversationMemory:
 
         history = memory.get_messages()
         assert len(history) == 2
-        assert history[0] == {"role": "user", "content": "Hello"}
-        assert history[1] == {"role": "assistant", "content": "Hi there!"}
+        assert history[0]["role"] == "user"
+        assert history[0]["content"] == "Hello"
+        assert "timestamp" in history[0]
+        assert history[1]["role"] == "assistant"
+        assert history[1]["content"] == "Hi there!"
+        assert "timestamp" in history[1]
 
     def test_max_messages_limit(self):
         """Test that messages are trimmed when exceeding limit."""
@@ -47,10 +51,13 @@ class TestConversationMemory:
         memory.add_message("assistant", "Hello!")
 
         messages = memory.get_messages()
-        assert messages == [
-            {"role": "user", "content": "Hi"},
-            {"role": "assistant", "content": "Hello!"},
-        ]
+        assert len(messages) == 2
+        assert messages[0]["role"] == "user"
+        assert messages[0]["content"] == "Hi"
+        assert "timestamp" in messages[0]
+        assert messages[1]["role"] == "assistant"
+        assert messages[1]["content"] == "Hello!"
+        assert "timestamp" in messages[1]
 
     def test_set_messages(self):
         """Test setting messages from external source."""

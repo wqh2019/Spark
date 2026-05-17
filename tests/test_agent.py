@@ -13,8 +13,13 @@ from spark.prompts import DEFAULT_SYSTEM_PROMPT
 class TestAgentInit:
     """Tests for Agent initialization."""
 
-    def test_default_init(self):
+    def test_default_init(self, monkeypatch):
         """Test agent initialization with defaults."""
+        # Clear env vars to test defaults
+        monkeypatch.delenv("OPENAI_MODEL", raising=False)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+
         agent = Agent()
         assert agent.model == "gpt-4"
         assert agent.tools == []
