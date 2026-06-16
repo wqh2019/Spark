@@ -115,10 +115,10 @@ interface Tool {
 | `write_file` | 写入/创建文件 | 是 |
 | `edit_file` | 精确字符串替换 (replace_all) | 是 |
 | `list_dir` | 目录列表 | 否 |
-| `run_command` | Shell 命令执行 (bash -c) | 是 |
+| `run_command` | Shell 命令执行（Windows: cmd /c, 其他: bash -c） | 是 |
 | `glob` | 文件名模式搜索 | 否 |
 | `grep` | 内容正则搜索 | 否 |
-| `format` | 代码格式化 (prettier/eslint --fix) | 是 |
+| `format` | 代码格式化（检测项目 prettier/eslint 配置，无则跳过） | 是 |
 | `git_status` | Git 状态查看 | 否 |
 | `git_diff` | Git diff 查看 | 否 |
 
