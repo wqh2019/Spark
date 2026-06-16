@@ -50,8 +50,6 @@ logs/
 # Lock files (optional, uncomment if you prefer)
 # uv.lock
 
-# Design docs (local only)
-docs/superpowers/
 
 # Claude Code config (local only)
 .claude/
