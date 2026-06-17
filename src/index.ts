@@ -1,1 +1,10 @@
-export { runAgent } from './agent.js';
+export { Agent, runAgent } from './agent.js';
+export { LLMClient } from './llm.js';
+export type { LLMConfig, LLMResponse } from './llm.js';
+export { ConversationMemory } from './memory.js';
+export type { Message, ToolCall } from './memory.js';
+export { loadConfig } from './config.js';
+export type { SparkConfig } from './config.js';
+export { ToolRegistry, createToolRegistry } from './tools/index.js';
+export type { Tool } from './tools/index.js';
+export { SafetyChecker, requiresConfirmation } from './safety.js';
