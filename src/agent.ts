@@ -1,10 +1,11 @@
+import OpenAI from "openai";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions.js";
 import type { SparkConfig } from "./config.js";
-import { LLMClient, type ToolCallDelta } from "./llm.js";
+import { LLMClient, type LLMResponse } from "./llm.js";
 import { ConversationMemory, type Message, type ToolCall } from "./memory.js";
-import { executeTool, getTool } from "./tools/index.js";
+import { ToolRegistry, createToolRegistry } from "./tools/index.js";
 import { requiresConfirmation } from "./safety.js";
-import { buildSystemPrompt } from "./prompt.js";
+import { SYSTEM_PROMPT } from "./prompt.js";
 import {
   renderTextDelta,
   renderTextComplete,
@@ -19,111 +20,156 @@ import { setShellProjectDir } from "./tools/shell.js";
 import { setSearchProjectDir } from "./tools/search.js";
 import { setDevProjectDir } from "./tools/dev.js";
 
+export interface AgentOptions {
+  maxSteps?: number;
+  autoApprove?: string[];
+  systemPrompt?: string;
+}
+
 export class Agent {
   private llm: LLMClient;
   private memory: ConversationMemory;
-  private config: SparkConfig;
-  private autoApproved = false;
+  private registry: ToolRegistry;
+  private maxSteps: number;
+  private autoApprove: Set<string>;
+  private systemPrompt: string;
+  private approveAll = false;
   private cwd: string;
 
-  constructor(config: SparkConfig, memory?: ConversationMemory) {
-    this.config = config;
+  constructor(
+    config: SparkConfig,
+    memory?: ConversationMemory,
+    options?: AgentOptions,
+  ) {
+    this.cwd = process.cwd();
     this.llm = new LLMClient(config);
     this.memory = memory ?? new ConversationMemory();
-    this.cwd = process.cwd();
+    this.maxSteps = options?.maxSteps ?? config.maxSteps;
+    this.autoApprove = new Set(options?.autoApprove ?? config.autoApprove);
+    this.systemPrompt = options?.systemPrompt ?? SYSTEM_PROMPT;
+    this.registry = new ToolRegistry();
 
+    // Initialize tool registry asynchronously at first use
+    this.initRegistry();
+    this.setProjectDirs();
+  }
+
+  private initialized = false;
+  private initPromise: Promise<void> | null = null;
+
+  private initRegistry(): void {
+    this.initPromise = createToolRegistry().then((reg) => {
+      this.registry = reg;
+      this.initialized = true;
+    });
+  }
+
+  private async ensureInit(): Promise<void> {
+    if (!this.initialized) {
+      await this.initPromise;
+    }
+  }
+
+  private setProjectDirs(): void {
     setProjectDir(this.cwd);
     setShellProjectDir(this.cwd);
     setSearchProjectDir(this.cwd);
     setDevProjectDir(this.cwd);
-
-    if (config.autoApprove.includes("*")) {
-      this.autoApproved = true;
-    }
   }
 
   get sessionId(): string {
     return this.memory.id;
   }
 
-  async run(userMessage: string): Promise<void> {
+  async run(userMessage: string): Promise<string> {
+    await this.ensureInit();
+
     if (this.memory.getMessages().length === 0) {
-      this.memory.addMessage("system", buildSystemPrompt(this.cwd));
+      this.memory.addMessage("system", this.systemPrompt);
     }
 
     this.memory.addMessage("user", userMessage);
 
-    for (let step = 0; step < this.config.maxSteps; step++) {
+    for (let step = 0; step < this.maxSteps; step++) {
       const messages = this.toOpenAIMessages(this.memory.getMessages());
+      const toolSchemas = this.registry.getSchemas();
 
-      let response: Awaited<ReturnType<typeof this.llm.chat>>;
+      let response: LLMResponse;
       try {
-        response = await this.llm.chat(messages, (delta) => {
-          renderTextDelta(delta);
-        });
-      } catch (err) {
-        renderError(
-          err instanceof Error ? err.message : String(err),
+        response = await this.llm.chat(
+          messages,
+          toolSchemas.length > 0
+            ? (toolSchemas as OpenAI.Chat.Completions.ChatCompletionTool[])
+            : undefined,
         );
-        return;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        renderError(msg);
+        return msg;
       }
       renderTextComplete();
 
       const assistantContent = response.content ?? "";
-      const toolCalls =
-        response.toolCalls.length > 0
-          ? response.toolCalls.map((tc) => ({
-              id: tc.id,
-              type: "function" as const,
-              function: { name: tc.name, arguments: tc.arguments },
-            }))
-          : undefined;
+      const toolCalls = response.toolCalls;
 
       this.memory.addMessage("assistant", assistantContent, {
         tool_calls: toolCalls,
       });
 
-      if (response.toolCalls.length === 0) {
-        return;
+      if (!toolCalls || toolCalls.length === 0) {
+        return assistantContent;
       }
 
-      for (const tc of response.toolCalls) {
+      // Execute tool calls sequentially
+      for (const tc of toolCalls) {
         await this.executeToolCall(tc);
       }
     }
 
-    renderInfo(`Reached maximum steps (${this.config.maxSteps}). Stopping.`);
+    const limitMsg = `Reached maximum steps (${this.maxSteps}). Task may be incomplete.`;
+    renderInfo(limitMsg);
+    return limitMsg;
   }
 
-  private async executeToolCall(tc: ToolCallDelta): Promise<void> {
-    const args = this.parseArgs(tc.arguments);
-    renderToolStart(tc.name, args);
+  private async executeToolCall(
+    tc: OpenAI.Chat.Completions.ChatCompletionMessageToolCall,
+  ): Promise<void> {
+    const args = this.parseArgs(tc.function.arguments);
+    renderToolStart(tc.function.name, args);
 
-    const tool = getTool(tc.name);
+    const tool = this.registry.get(tc.function.name);
     const needsConfirm =
-      tool?.requiresConfirmation ?? requiresConfirmation(tc.name);
+      tool?.requiresConfirmation ?? requiresConfirmation(tc.function.name);
 
-    if (needsConfirm && !this.autoApproved) {
-      if (!this.config.autoApprove.includes(tc.name)) {
-        const result = await confirmAction(`Allow ${tc.name}?`);
-        if (result === "all") {
-          this.autoApproved = true;
-        } else if (result === false) {
-          const denyMsg = `User denied ${tc.name} execution.`;
-          this.memory.addMessage("tool", denyMsg, {
-            tool_call_id: tc.id,
-          });
-          renderToolResult(tc.name, "Denied by user", true);
-          return;
-        }
+    if (needsConfirm && !this.approveAll && !this.autoApprove.has(tc.function.name)) {
+      const result = await confirmAction(`Allow ${tc.function.name}?`);
+      if (result === "all") {
+        this.approveAll = true;
+      } else if (result === false) {
+        const denyMsg = `User denied ${tc.function.name} execution.`;
+        this.memory.addMessage("tool", denyMsg, {
+          tool_call_id: tc.id,
+        });
+        renderToolResult(tc.function.name, "Denied by user", true);
+        return;
       }
     }
 
-    const execResult = await executeTool(tc.name, args);
+    let execResult: string;
+    if (tool) {
+      try {
+        execResult = await tool.execute(args);
+      } catch (err: any) {
+        execResult = `Error executing ${tc.function.name}: ${err.message}`;
+        renderError(execResult);
+      }
+    } else {
+      execResult = `Error: unknown tool "${tc.function.name}"`;
+      renderError(execResult);
+    }
 
-    renderToolResult(tc.name, execResult.result, execResult.error);
-
-    this.memory.addMessage("tool", execResult.result, {
+    renderToolResult(tc.function.name, execResult);
+    this.memory.addMessage("tool", execResult, {
       tool_call_id: tc.id,
     });
   }
@@ -175,7 +221,8 @@ export class Agent {
 export async function runAgent(
   config: SparkConfig,
   query: string,
-): Promise<void> {
-  const agent = new Agent(config);
-  await agent.run(query);
+  options?: AgentOptions,
+): Promise<string> {
+  const agent = new Agent(config, undefined, options);
+  return agent.run(query);
 }
