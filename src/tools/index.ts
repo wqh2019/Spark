@@ -100,3 +100,31 @@ export async function executeTool(
     return { toolName: name, result: `Tool error: ${message}`, error: true };
   }
 }
+
+/**
+ * Create a fresh ToolRegistry with all built-in tools registered.
+ * Uses dynamic imports to avoid circular dependency issues
+ * (tool modules import from this index module).
+ *
+ * Returns a registry with 10 tools:
+ *   - fileTools: read_file, write_file, edit_file, list_dir
+ *   - shellTools: run_command
+ *   - searchTools: glob_files, grep_content
+ *   - devTools: git_status, git_diff, format
+ */
+export async function createToolRegistry(): Promise<ToolRegistry> {
+  const [{ fileTools }, { shellTools }, { searchTools }, { devTools }] =
+    await Promise.all([
+      import("./file.js"),
+      import("./shell.js"),
+      import("./search.js"),
+      import("./dev.js"),
+    ]);
+
+  const registry = new ToolRegistry();
+  const allTools = [...fileTools, ...shellTools, ...searchTools, ...devTools];
+  for (const tool of allTools) {
+    registry.register(tool);
+  }
+  return registry;
+}
