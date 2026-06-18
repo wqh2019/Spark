@@ -38,6 +38,7 @@ const readFile: Tool = {
       description: `Maximum number of lines to read (default: ${DEFAULT_READ_LIMIT})`,
     },
   },
+  required: ["file_path"],
   requiresConfirmation: false,
   async execute(args) {
     const filePath = String(args.file_path);
@@ -94,6 +95,7 @@ const writeFile: Tool = {
     },
   },
   requiresConfirmation: true,
+  required: ["file_path", "content"],
   async execute(args) {
     const filePath = String(args.file_path);
     const content = String(args.content);
@@ -143,6 +145,7 @@ const editFile: Tool = {
     },
   },
   requiresConfirmation: true,
+  required: ["file_path", "old_string", "new_string"],
   async execute(args) {
     const filePath = String(args.file_path);
     const oldStr = String(args.old_string);
