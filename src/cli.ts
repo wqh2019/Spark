@@ -114,7 +114,7 @@ async function interactiveLoop(agent: Agent): Promise<void> {
 
   renderInfo("Spark coding agent. Type your message, or 'exit' to quit.");
   renderInfo(`Session: ${agent.sessionId}`);
-  renderInfo("Press Ctrl+C to interrupt the current response.");
+  renderInfo("Ctrl+C to interrupt | \"\"\" for multi-line input");
 
   while (true) {
     const input = await question("\n> ");
@@ -127,12 +127,26 @@ async function interactiveLoop(agent: Agent): Promise<void> {
       break;
     }
 
+    // Multi-line mode: """ starts a block, another """ ends it
+    let message = input;
+    if (trimmed === '"""') {
+      const lines: string[] = [];
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const line = await question("... ");
+        if (line.trim() === '"""') break;
+        lines.push(line);
+      }
+      message = lines.join("\n");
+      if (!message.trim()) continue;
+    }
+
     const controller = new AbortController();
     const onSigInt = () => controller.abort();
     process.once("SIGINT", onSigInt);
 
     try {
-      await agent.run(trimmed, controller.signal);
+      await agent.run(message, controller.signal);
     } catch (err) {
       renderError(err instanceof Error ? err.message : String(err));
     } finally {
