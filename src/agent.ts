@@ -81,7 +81,7 @@ export class Agent {
     return this.memory.id;
   }
 
-  async run(userMessage: string): Promise<string> {
+  async run(userMessage: string, signal?: AbortSignal): Promise<string> {
     await this.ensureInit();
 
     if (this.memory.getMessages().length === 0) {
@@ -90,11 +90,20 @@ export class Agent {
 
     this.memory.addMessage("user", userMessage);
 
+    let content = "";
+
     for (let step = 0; step < this.maxSteps; step++) {
+      if (signal?.aborted) {
+        renderInfo("Interrupted by user.");
+        return content || "Interrupted by user.";
+      }
+
+      renderInfo(`Step ${step + 1}/${this.maxSteps}`);
+
       const messages = this.toOpenAIMessages(this.memory.getMessages());
       const toolSchemas = this.registry.getSchemas();
 
-      let content = "";
+      content = "";
       let toolCalls: OpenAI.Chat.Completions.ChatCompletionMessageToolCall[] | undefined;
 
       try {

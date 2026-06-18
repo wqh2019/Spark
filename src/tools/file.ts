@@ -111,7 +111,8 @@ const writeFile: Tool = {
       }
 
       writeFileSync(filePath, content, "utf-8");
-      return `Successfully wrote ${content.length} characters to ${filePath}`;
+      const lineCount = content.split("\n").length;
+      return `Successfully wrote ${content.length} characters (${lineCount} lines) to ${filePath}`;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return `Error writing file: ${message}`;

@@ -40,11 +40,17 @@ const gitStatus: Tool = {
 
 const gitDiff: Tool = {
   name: "git_diff",
-  description: "Show git diff of changes against HEAD.",
-  parameters: {},
+  description: "Show git diff of changes. Defaults to HEAD.",
+  parameters: {
+    target: {
+      type: "string",
+      description: "Branch, commit, or tag to diff against (default: HEAD)",
+    },
+  },
   requiresConfirmation: false,
-  async execute() {
-    return runExec("git diff HEAD");
+  async execute(args) {
+    const target = args.target ? String(args.target) : "HEAD";
+    return runExec(`git diff ${target}`);
   },
 };
 
@@ -73,10 +79,16 @@ const format: Tool = {
   name: "format",
   description:
     "Run code formatter and linter. Detects prettier and/or eslint config; runs whichever is found.",
-  parameters: {},
+  parameters: {
+    path: {
+      type: "string",
+      description: "File or directory to format (default: .)",
+    },
+  },
   requiresConfirmation: true,
-  async execute() {
+  async execute(args) {
     const { prettier: hasPrettier, eslint: hasEslint } = detectFormatterConfigs(projectDir);
+    const target = args.path ? String(args.path) : ".";
 
     if (!hasPrettier && !hasEslint) {
       return "No prettier or eslint configuration found. Skipping format.";
@@ -85,12 +97,12 @@ const format: Tool = {
     const results: string[] = [];
 
     if (hasPrettier) {
-      const prettierResult = await runExec("npx prettier --write .");
+      const prettierResult = await runExec(`npx prettier --write ${target}`);
       results.push(`[prettier]\n${prettierResult}`);
     }
 
     if (hasEslint) {
-      const eslintResult = await runExec("npx eslint --fix .");
+      const eslintResult = await runExec(`npx eslint --fix ${target}`);
       results.push(`[eslint]\n${eslintResult}`);
     }
 
@@ -102,14 +114,20 @@ const lint: Tool = {
   name: "lint",
   description:
     "Run eslint to check for issues. Detects project eslint config; skips if none found.",
-  parameters: {},
+  parameters: {
+    path: {
+      type: "string",
+      description: "File or directory to lint (default: .)",
+    },
+  },
   requiresConfirmation: true,
-  async execute() {
+  async execute(args) {
     const { eslint: hasEslint } = detectFormatterConfigs(projectDir);
     if (!hasEslint) {
       return "No eslint configuration found. Skipping lint.";
     }
-    return runExec("npx eslint .");
+    const target = args.path ? String(args.path) : ".";
+    return runExec(`npx eslint ${target}`);
   },
 };
 

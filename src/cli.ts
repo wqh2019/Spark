@@ -114,6 +114,7 @@ async function interactiveLoop(agent: Agent): Promise<void> {
 
   renderInfo("Spark coding agent. Type your message, or 'exit' to quit.");
   renderInfo(`Session: ${agent.sessionId}`);
+  renderInfo("Press Ctrl+C to interrupt the current response.");
 
   while (true) {
     const input = await question("\n> ");
@@ -126,10 +127,16 @@ async function interactiveLoop(agent: Agent): Promise<void> {
       break;
     }
 
+    const controller = new AbortController();
+    const onSigInt = () => controller.abort();
+    process.once("SIGINT", onSigInt);
+
     try {
-      await agent.run(trimmed);
+      await agent.run(trimmed, controller.signal);
     } catch (err) {
       renderError(err instanceof Error ? err.message : String(err));
+    } finally {
+      process.removeListener("SIGINT", onSigInt);
     }
   }
 }
