@@ -69,17 +69,17 @@ spark config
 
 | 工具 | 说明 | 需要确认 |
 |------|------|----------|
-| `read_file` | 读取文件内容，带行号，支持偏移和行数限制 | 否 |
-| `write_file` | 写入或创建文件（自动创建父目录） | 是 |
+| `read_file` | 读取文件内容，带行号（支持 `offset`、`limit`） | 否 |
+| `write_file` | 写入或创建文件（自动创建父目录，返回字符数和行数） | 是 |
 | `edit_file` | 精确字符串替换（支持 `replace_all`） | 是 |
 | `list_dir` | 列出目录内容及文件大小 | 否 |
-| `run_command` | 执行 Shell 命令 | 是 |
-| `glob_files` | 按文件名模式搜索 | 否 |
-| `grep_content` | 按正则搜索文件内容 | 否 |
+| `run_command` | 执行 Shell 命令（支持 `timeout`） | 是 |
+| `glob_files` | 按文件名模式搜索（支持 `path`） | 否 |
+| `grep_content` | 按正则搜索文件内容（支持 `path`） | 否 |
 | `git_status` | 查看 Git 工作区状态 | 否 |
-| `git_diff` | 查看 Git 变更差异 | 否 |
-| `format` | 运行 prettier 和/或 eslint --fix（自动检测配置） | 是 |
-| `lint` | 运行 eslint 检查（自动检测配置） | 是 |
+| `git_diff` | 查看 Git 变更差异（支持 `target` 指定分支/commit） | 否 |
+| `format` | 运行 prettier 和/或 eslint --fix（自动检测配置，支持 `path`） | 是 |
+| `lint` | 运行 eslint 检查（自动检测配置，支持 `path`） | 是 |
 | `test` | 运行项目测试（`npm test`） | 否 |
 
 ## 安全机制
@@ -92,7 +92,12 @@ spark config
 
 ## 流式输出
 
-Spark 逐 token 流式输出 LLM 回复，无需等待完整响应。每次回复后显示 token 用量（提示 + 补全）。
+Spark 逐 token 流式输出 LLM 回复，无需等待完整响应。推理过程中显示当前步骤进度（`Step 1/20`），每次回复后显示 token 用量（提示 + 补全）。
+
+## 交互操作
+
+- **Ctrl+C** — 中断当前推理，回到 `>` 提示符（不会退出程序）
+- **exit / quit** — 退出交互模式
 
 ## 开发
 
