@@ -13,9 +13,9 @@ import { SafetyChecker } from "../safety.js";
 let projectDir = process.cwd();
 let safetyChecker = new SafetyChecker({ projectRoot: projectDir });
 
-export function setProjectDir(dir: string): void {
+export function setProjectDir(dir: string, maxFileSize?: number): void {
   projectDir = dir;
-  safetyChecker = new SafetyChecker({ projectRoot: dir });
+  safetyChecker = new SafetyChecker({ projectRoot: dir, maxFileSize });
 }
 
 const DEFAULT_READ_LIMIT = 2000;
@@ -53,6 +53,13 @@ const readFile: Tool = {
     try {
       if (!existsSync(filePath)) {
         return `Error reading file: File not found: ${filePath}`;
+      }
+
+      const fileSize = statSync(filePath).size;
+      try {
+        safetyChecker.checkFileSize(fileSize);
+      } catch (err) {
+        return err instanceof Error ? err.message : String(err);
       }
 
       const content = readFileSync(filePath, "utf-8");
@@ -150,6 +157,13 @@ const editFile: Tool = {
     try {
       if (!existsSync(filePath)) {
         return `Error editing file: File not found: ${filePath}`;
+      }
+
+      const fileSize = statSync(filePath).size;
+      try {
+        safetyChecker.checkFileSize(fileSize);
+      } catch (err) {
+        return err instanceof Error ? err.message : String(err);
       }
 
       const content = readFileSync(filePath, "utf-8");

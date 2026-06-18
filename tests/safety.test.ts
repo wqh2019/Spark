@@ -85,6 +85,25 @@ describe("SafetyChecker", () => {
     expect(() => customChecker.checkCommand("rm -rf /")).not.toThrow();
   });
 
+  // --- checkFileSize ---
+
+  it("allows files within size limit", () => {
+    expect(() => checker.checkFileSize(1024)).not.toThrow();
+    expect(() => checker.checkFileSize(10 * 1024 * 1024)).not.toThrow();
+  });
+
+  it("blocks files exceeding size limit", () => {
+    expect(() => checker.checkFileSize(10 * 1024 * 1024 + 1)).toThrow(
+      "exceeds limit",
+    );
+  });
+
+  it("respects custom maxFileSize", () => {
+    const smallChecker = new SafetyChecker({ projectRoot, maxFileSize: 100 });
+    expect(() => smallChecker.checkFileSize(100)).not.toThrow();
+    expect(() => smallChecker.checkFileSize(101)).toThrow("exceeds limit");
+  });
+
   // --- requiresConfirmation ---
 
   it("marks write_file as requiring confirmation", () => {

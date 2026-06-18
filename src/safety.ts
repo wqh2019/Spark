@@ -53,6 +53,18 @@ export class SafetyChecker {
       }
     }
   }
+
+  /**
+   * Validates that the given file size does not exceed maxFileSize.
+   * Throws an Error if the file exceeds the limit.
+   */
+  checkFileSize(size: number): void {
+    if (size > this.maxFileSize) {
+      throw new Error(
+        `File size ${size} bytes exceeds limit of ${this.maxFileSize} bytes`,
+      );
+    }
+  }
 }
 
 const CONFIRMATION_REQUIRED = new Set([

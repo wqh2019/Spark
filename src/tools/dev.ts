@@ -54,20 +54,47 @@ const PRETTIER_CONFIG_FILES = [
   "prettier.config.js",
 ];
 
+const ESLINT_CONFIG_FILES = [
+  ".eslintrc",
+  ".eslintrc.js",
+  ".eslintrc.json",
+  ".eslintrc.yml",
+  "eslint.config.js",
+];
+
+export function detectFormatterConfigs(dir: string): { prettier: boolean; eslint: boolean } {
+  return {
+    prettier: PRETTIER_CONFIG_FILES.some((file) => existsSync(resolve(dir, file))),
+    eslint: ESLINT_CONFIG_FILES.some((file) => existsSync(resolve(dir, file))),
+  };
+}
+
 const format: Tool = {
   name: "format",
   description:
-    "Run code formatter using prettier. Detects project prettier config; skips if none found.",
+    "Run code formatter and linter. Detects prettier and/or eslint config; runs whichever is found.",
   parameters: {},
   requiresConfirmation: true,
   async execute() {
-    const hasConfig = PRETTIER_CONFIG_FILES.some((file) =>
-      existsSync(resolve(projectDir, file)),
-    );
-    if (!hasConfig) {
-      return "No prettier configuration found. Skipping format.";
+    const { prettier: hasPrettier, eslint: hasEslint } = detectFormatterConfigs(projectDir);
+
+    if (!hasPrettier && !hasEslint) {
+      return "No prettier or eslint configuration found. Skipping format.";
     }
-    return runExec("npx prettier --write .");
+
+    const results: string[] = [];
+
+    if (hasPrettier) {
+      const prettierResult = await runExec("npx prettier --write .");
+      results.push(`[prettier]\n${prettierResult}`);
+    }
+
+    if (hasEslint) {
+      const eslintResult = await runExec("npx eslint --fix .");
+      results.push(`[eslint]\n${eslintResult}`);
+    }
+
+    return results.join("\n\n");
   },
 };
 

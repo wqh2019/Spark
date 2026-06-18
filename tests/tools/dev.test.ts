@@ -1,5 +1,8 @@
-import { describe, it, expect } from "vitest";
-import { devTools, setDevProjectDir } from "../../src/tools/dev.js";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { devTools, setDevProjectDir, detectFormatterConfigs } from "../../src/tools/dev.js";
 import type { Tool } from "../../src/tools/index.js";
 
 function getTool(name: string): Tool {
@@ -52,5 +55,62 @@ describe("git_diff", () => {
     const result = await gitDiff.execute({});
     expect(typeof result).toBe("string");
     expect(result.length).toBeGreaterThan(0);
+  });
+});
+
+describe("detectFormatterConfigs", () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "spark-test-"));
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("returns false for both when no config found", () => {
+    expect(detectFormatterConfigs(tempDir)).toEqual({ prettier: false, eslint: false });
+  });
+
+  it("detects prettier config", () => {
+    writeFileSync(join(tempDir, ".prettierrc"), "{}");
+    expect(detectFormatterConfigs(tempDir)).toEqual({ prettier: true, eslint: false });
+  });
+
+  it("detects eslint config", () => {
+    writeFileSync(join(tempDir, ".eslintrc.json"), "{}");
+    expect(detectFormatterConfigs(tempDir)).toEqual({ prettier: false, eslint: true });
+  });
+
+  it("detects both prettier and eslint configs", () => {
+    writeFileSync(join(tempDir, ".prettierrc"), "{}");
+    writeFileSync(join(tempDir, ".eslintrc.json"), "{}");
+    expect(detectFormatterConfigs(tempDir)).toEqual({ prettier: true, eslint: true });
+  });
+
+  it("detects alternative eslint config files", () => {
+    writeFileSync(join(tempDir, "eslint.config.js"), "");
+    expect(detectFormatterConfigs(tempDir)).toEqual({ prettier: false, eslint: true });
+  });
+
+  it("detects alternative prettier config files", () => {
+    writeFileSync(join(tempDir, "prettier.config.js"), "");
+    expect(detectFormatterConfigs(tempDir)).toEqual({ prettier: true, eslint: false });
+  });
+});
+
+describe("format tool skips when no config", () => {
+  it("returns skip message when no config found", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "spark-test-"));
+    setDevProjectDir(tempDir);
+    try {
+      const format = getTool("format");
+      const result = await format.execute({});
+      expect(result).toContain("No prettier or eslint configuration found");
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+      setDevProjectDir(process.cwd());
+    }
   });
 });

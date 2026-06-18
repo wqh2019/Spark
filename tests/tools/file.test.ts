@@ -343,3 +343,38 @@ describe("file tools path safety", () => {
     expect(result).toContain("outside project");
   });
 });
+
+describe("file tools file size check", () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "spark-test-"));
+    // Set a very small max file size to trigger the check
+    setProjectDir(tempDir, 50);
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("read_file blocks oversized files", async () => {
+    const readFile = getTool("read_file");
+    // Write a file larger than 50 bytes
+    const filePath = join(tempDir, "big.txt");
+    writeFileSync(filePath, "x".repeat(100));
+    const result = await readFile.execute({ file_path: filePath });
+    expect(result).toContain("exceeds limit");
+  });
+
+  it("edit_file blocks oversized files", async () => {
+    const editFile = getTool("edit_file");
+    const filePath = join(tempDir, "big.txt");
+    writeFileSync(filePath, "x".repeat(100));
+    const result = await editFile.execute({
+      file_path: filePath,
+      old_string: "x",
+      new_string: "y",
+    });
+    expect(result).toContain("exceeds limit");
+  });
+});
