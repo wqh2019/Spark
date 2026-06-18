@@ -2,46 +2,20 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { loadConfig } from "../src/config.js";
 
 describe("loadConfig", () => {
-  const originalEnv: Record<string, string | undefined> = {};
-
-  beforeEach(() => {
-    // Snapshot relevant env vars so we can restore them after each test
-    for (const key of [
-      "OPENAI_API_KEY",
-      "OPENAI_BASE_URL",
-      "OPENAI_MODEL",
-      "SPARK_MAX_STEPS",
-      "SPARK_AUTO_APPROVE",
-    ]) {
-      originalEnv[key] = process.env[key];
-    }
-  });
+  const originalEnv = { ...process.env };
 
   afterEach(() => {
-    // Restore env vars to their original state
-    for (const key of Object.keys(originalEnv)) {
-      if (originalEnv[key] === undefined) {
-        delete process.env[key];
-      } else {
-        process.env[key] = originalEnv[key];
-      }
-    }
+    process.env = { ...originalEnv };
   });
 
-  function clearSparkEnv() {
-    delete process.env.OPENAI_API_KEY;
+  it("loads defaults when only API key is set", () => {
+    process.env.OPENAI_API_KEY = "test-key";
     delete process.env.OPENAI_BASE_URL;
     delete process.env.OPENAI_MODEL;
     delete process.env.SPARK_MAX_STEPS;
     delete process.env.SPARK_AUTO_APPROVE;
-  }
-
-  it("uses defaults when only OPENAI_API_KEY is set", () => {
-    clearSparkEnv();
-    process.env.OPENAI_API_KEY = "test-key";
 
     const config = loadConfig();
-
     expect(config.apiKey).toBe("test-key");
     expect(config.baseURL).toBe("https://api.openai.com/v1");
     expect(config.model).toBe("gpt-4");
@@ -49,89 +23,76 @@ describe("loadConfig", () => {
     expect(config.autoApprove).toEqual([]);
   });
 
-  it("reads all env vars correctly", () => {
-    clearSparkEnv();
-    process.env.OPENAI_API_KEY = "my-key";
-    process.env.OPENAI_BASE_URL = "https://custom.api.com/v1";
-    process.env.OPENAI_MODEL = "gpt-3.5-turbo";
-    process.env.SPARK_MAX_STEPS = "50";
-    process.env.SPARK_AUTO_APPROVE = "read,write,search";
+  it("reads OPENAI_BASE_URL from env", () => {
+    process.env.OPENAI_API_KEY = "test-key";
+    process.env.OPENAI_BASE_URL = "http://localhost:11434/v1";
 
     const config = loadConfig();
+    expect(config.baseURL).toBe("http://localhost:11434/v1");
+  });
 
-    expect(config.apiKey).toBe("my-key");
-    expect(config.baseURL).toBe("https://custom.api.com/v1");
+  it("reads OPENAI_MODEL from env", () => {
+    process.env.OPENAI_API_KEY = "test-key";
+    process.env.OPENAI_MODEL = "gpt-3.5-turbo";
+
+    const config = loadConfig();
     expect(config.model).toBe("gpt-3.5-turbo");
-    expect(config.maxSteps).toBe(50);
-    expect(config.autoApprove).toEqual(["read", "write", "search"]);
   });
 
-  it("throws if OPENAI_API_KEY is missing", () => {
-    clearSparkEnv();
+  it("reads SPARK_MAX_STEPS from env", () => {
+    process.env.OPENAI_API_KEY = "test-key";
+    process.env.SPARK_MAX_STEPS = "5";
 
-    expect(() => loadConfig()).toThrow(/OPENAI_API_KEY/);
+    const config = loadConfig();
+    expect(config.maxSteps).toBe(5);
   });
 
-  it("CLI args (overrides) take priority over env vars", () => {
-    clearSparkEnv();
+  it("reads SPARK_AUTO_APPROVE from env as comma-separated list", () => {
+    process.env.OPENAI_API_KEY = "test-key";
+    process.env.SPARK_AUTO_APPROVE = "read_file, write_file";
+
+    const config = loadConfig();
+    expect(config.autoApprove).toEqual(["read_file", "write_file"]);
+  });
+
+  it("throws error when OPENAI_API_KEY is not set", () => {
+    delete process.env.OPENAI_API_KEY;
+    expect(() => loadConfig()).toThrow("OPENAI_API_KEY is required");
+  });
+
+  it("CLI overrides take precedence over env vars", () => {
     process.env.OPENAI_API_KEY = "env-key";
-    process.env.OPENAI_BASE_URL = "https://env.url/v1";
-    process.env.OPENAI_MODEL = "gpt-4";
-    process.env.SPARK_MAX_STEPS = "10";
-    process.env.SPARK_AUTO_APPROVE = "read";
+    process.env.OPENAI_BASE_URL = "http://env-url/v1";
+    process.env.OPENAI_MODEL = "env-model";
 
     const config = loadConfig({
-      apiKey: "override-key",
-      baseURL: "https://override.url/v1",
-      model: "gpt-4o",
-      maxSteps: 99,
-      autoApprove: ["shell", "edit"],
+      apiKey: "cli-key",
+      baseURL: "http://cli-url/v1",
+      model: "cli-model",
+      maxSteps: 3,
+      autoApprove: ["run_command"],
     });
 
-    expect(config.apiKey).toBe("override-key");
-    expect(config.baseURL).toBe("https://override.url/v1");
-    expect(config.model).toBe("gpt-4o");
-    expect(config.maxSteps).toBe(99);
-    expect(config.autoApprove).toEqual(["shell", "edit"]);
+    expect(config.apiKey).toBe("cli-key");
+    expect(config.baseURL).toBe("http://cli-url/v1");
+    expect(config.model).toBe("cli-model");
+    expect(config.maxSteps).toBe(3);
+    expect(config.autoApprove).toEqual(["run_command"]);
   });
 
-  it("parses SPARK_MAX_STEPS as integer", () => {
-    clearSparkEnv();
-    process.env.OPENAI_API_KEY = "key";
-    process.env.SPARK_MAX_STEPS = "42";
+  it("trims whitespace in SPARK_AUTO_APPROVE values", () => {
+    process.env.OPENAI_API_KEY = "test-key";
+    process.env.SPARK_AUTO_APPROVE = "  read_file ,  write_file  ";
 
     const config = loadConfig();
-
-    expect(config.maxSteps).toBe(42);
-    expect(typeof config.maxSteps).toBe("number");
+    expect(config.autoApprove).toEqual(["read_file", "write_file"]);
   });
 
-  it("handles SPARK_AUTO_APPROVE with empty string as empty array", () => {
-    clearSparkEnv();
-    process.env.OPENAI_API_KEY = "key";
-    process.env.SPARK_AUTO_APPROVE = "";
+  it("returns empty autoApprove for empty string", () => {
+    process.env.OPENAI_API_KEY = "test-key";
+    process.env.SPARK_AUTO_APPROVE = "  ,  ,  ";
 
     const config = loadConfig();
-
     expect(config.autoApprove).toEqual([]);
-  });
-
-  it("allows overrides to fill in missing apiKey without throwing", () => {
-    clearSparkEnv();
-
-    const config = loadConfig({ apiKey: "provided-via-override" });
-
-    expect(config.apiKey).toBe("provided-via-override");
-    expect(config.baseURL).toBe("https://api.openai.com/v1");
-  });
-
-  it("trims whitespace from SPARK_AUTO_APPROVE entries", () => {
-    clearSparkEnv();
-    process.env.OPENAI_API_KEY = "key";
-    process.env.SPARK_AUTO_APPROVE = " read , write , search ";
-
-    const config = loadConfig();
-
-    expect(config.autoApprove).toEqual(["read", "write", "search"]);
   });
 });

@@ -1,7 +1,6 @@
 import { glob as globFn } from "glob";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { resolve, join } from "node:path";
-import { registerTool } from "./index.js";
 import type { Tool } from "./index.js";
 import { SafetyChecker } from "../safety.js";
 
@@ -145,8 +144,3 @@ const grepContent: Tool = {
 };
 
 export const searchTools: Tool[] = [globFiles, grepContent];
-
-// Auto-register with the global registry for backward compatibility
-for (const tool of searchTools) {
-  registerTool(tool);
-}

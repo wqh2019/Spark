@@ -1,7 +1,6 @@
 import { exec } from "node:child_process";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { registerTool } from "./index.js";
 import type { Tool } from "./index.js";
 
 let projectDir = process.cwd();
@@ -73,8 +72,3 @@ const format: Tool = {
 };
 
 export const devTools: Tool[] = [gitStatus, gitDiff, format];
-
-// Auto-register with the global registry for backward compatibility
-for (const tool of devTools) {
-  registerTool(tool);
-}

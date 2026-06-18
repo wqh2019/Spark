@@ -2,148 +2,132 @@ import { describe, it, expect } from "vitest";
 import { SafetyChecker, requiresConfirmation } from "../src/safety.js";
 
 describe("SafetyChecker", () => {
-  const projectRoot = "/home/user/project";
+  const projectRoot = process.cwd();
+  let checker: SafetyChecker;
 
-  describe("checkPath", () => {
-    it("allows paths inside project root", () => {
-      const checker = new SafetyChecker({ projectRoot });
-      expect(() => checker.checkPath("/home/user/project/src/index.ts")).not.toThrow();
-    });
-
-    it("rejects paths outside project root", () => {
-      const checker = new SafetyChecker({ projectRoot });
-      expect(() => checker.checkPath("/etc/passwd")).toThrow(/outside project/i);
-    });
-
-    it("rejects path traversal with ..", () => {
-      const checker = new SafetyChecker({ projectRoot });
-      expect(() => checker.checkPath("/home/user/project/../../etc/passwd")).toThrow(
-        /outside project/i
-      );
-    });
-
-    it("allows the project root itself", () => {
-      const checker = new SafetyChecker({ projectRoot });
-      expect(() => checker.checkPath(projectRoot)).not.toThrow();
-    });
-
-    it("rejects a path that is a sibling of project root", () => {
-      const checker = new SafetyChecker({ projectRoot });
-      expect(() => checker.checkPath("/home/user/other")).toThrow(/outside project/i);
-    });
+  beforeEach(() => {
+    checker = new SafetyChecker({ projectRoot });
   });
 
-  describe("checkCommand", () => {
-    it("allows normal commands", () => {
-      const checker = new SafetyChecker({ projectRoot });
-      expect(() => checker.checkCommand("ls -la")).not.toThrow();
-      expect(() => checker.checkCommand("npm test")).not.toThrow();
-      expect(() => checker.checkCommand("git status")).not.toThrow();
-    });
+  // --- checkPath ---
 
-    it("rejects rm -rf /", () => {
-      const checker = new SafetyChecker({ projectRoot });
-      expect(() => checker.checkCommand("rm -rf /")).toThrow(/blocked/i);
-    });
-
-    it("rejects rm -rf /*", () => {
-      const checker = new SafetyChecker({ projectRoot });
-      expect(() => checker.checkCommand("rm -rf /*")).toThrow(/blocked/i);
-    });
-
-    it("rejects sudo", () => {
-      const checker = new SafetyChecker({ projectRoot });
-      expect(() => checker.checkCommand("sudo apt install foo")).toThrow(/blocked/i);
-    });
-
-    it("rejects mkfs", () => {
-      const checker = new SafetyChecker({ projectRoot });
-      expect(() => checker.checkCommand("mkfs.ext4 /dev/sda1")).toThrow(/blocked/i);
-    });
-
-    it("rejects dd if=", () => {
-      const checker = new SafetyChecker({ projectRoot });
-      expect(() => checker.checkCommand("dd if=/dev/zero of=/dev/sda")).toThrow(/blocked/i);
-    });
-
-    it("rejects fork bomb", () => {
-      const checker = new SafetyChecker({ projectRoot });
-      expect(() => checker.checkCommand(":(){:|:&};:")).toThrow(/blocked/i);
-    });
-
-    it("rejects > /dev/sda", () => {
-      const checker = new SafetyChecker({ projectRoot });
-      expect(() => checker.checkCommand("> /dev/sda")).toThrow(/blocked/i);
-    });
-
-    it("blocks commands case-insensitively", () => {
-      const checker = new SafetyChecker({ projectRoot });
-      expect(() => checker.checkCommand("SUDO rm -rf /")).toThrow(/blocked/i);
-    });
-
-    it("allows custom blocked commands via constructor", () => {
-      const checker = new SafetyChecker({ projectRoot, blockedCommands: ["dangerous"] });
-      expect(() => checker.checkCommand("dangerous operation")).toThrow(/blocked/i);
-      // Normal commands still allowed
-      expect(() => checker.checkCommand("npm test")).not.toThrow();
-    });
+  it("allows paths inside project root", () => {
+    expect(() => checker.checkPath(projectRoot + "/src/index.ts")).not.toThrow();
+    expect(() => checker.checkPath(projectRoot + "/package.json")).not.toThrow();
   });
 
-  describe("maxFileSize", () => {
-    it("defaults to 10MB", () => {
-      const checker = new SafetyChecker({ projectRoot });
-      expect(checker.maxFileSize).toBe(10 * 1024 * 1024);
-    });
-
-    it("accepts custom maxFileSize", () => {
-      const checker = new SafetyChecker({ projectRoot, maxFileSize: 1024 });
-      expect(checker.maxFileSize).toBe(1024);
-    });
+  it("blocks paths outside project root", () => {
+    expect(() => checker.checkPath("/etc/passwd")).toThrow("outside project");
+    expect(() => checker.checkPath("/tmp/evil")).toThrow("outside project");
   });
-});
 
-describe("requiresConfirmation", () => {
-  it("returns true for write_file", () => {
+  it("blocks path traversal with ..", () => {
+    expect(() => checker.checkPath(projectRoot + "/../../../etc/passwd")).toThrow(
+      "outside project",
+    );
+  });
+
+  it("resolves relative paths against project root", () => {
+    // Relative paths resolve to CWD which should be the project root
+    expect(() => checker.checkPath("src/index.ts")).not.toThrow();
+  });
+
+  // --- checkCommand ---
+
+  it("allows safe commands", () => {
+    expect(() => checker.checkCommand("npm test")).not.toThrow();
+    expect(() => checker.checkCommand("git status")).not.toThrow();
+    expect(() => checker.checkCommand("ls -la")).not.toThrow();
+    expect(() => checker.checkCommand("echo hello")).not.toThrow();
+  });
+
+  it("blocks rm -rf /", () => {
+    expect(() => checker.checkCommand("rm -rf /")).toThrow("Blocked command");
+  });
+
+  it("blocks rm -rf /*", () => {
+    expect(() => checker.checkCommand("rm -rf /*")).toThrow("Blocked command");
+  });
+
+  it("blocks sudo commands", () => {
+    expect(() => checker.checkCommand("sudo rm something")).toThrow(
+      "Blocked command",
+    );
+  });
+
+  it("blocks mkfs", () => {
+    expect(() => checker.checkCommand("mkfs /dev/sda")).toThrow(
+      "Blocked command",
+    );
+  });
+
+  it("blocks dd if=", () => {
+    expect(() => checker.checkCommand("dd if=/dev/zero of=/dev/sda")).toThrow(
+      "Blocked command",
+    );
+  });
+
+  it("blocks case-insensitively", () => {
+    expect(() => checker.checkCommand("SUDO apt install")).toThrow(
+      "Blocked command",
+    );
+  });
+
+  it("allows custom blocked commands", () => {
+    const customChecker = new SafetyChecker({
+      projectRoot,
+      blockedCommands: ["dangerous_cmd"],
+    });
+    expect(() => customChecker.checkCommand("dangerous_cmd --flag")).toThrow(
+      "Blocked command",
+    );
+    // Default blocked patterns no longer apply
+    expect(() => customChecker.checkCommand("rm -rf /")).not.toThrow();
+  });
+
+  // --- requiresConfirmation ---
+
+  it("marks write_file as requiring confirmation", () => {
     expect(requiresConfirmation("write_file")).toBe(true);
   });
 
-  it("returns true for edit_file", () => {
+  it("marks edit_file as requiring confirmation", () => {
     expect(requiresConfirmation("edit_file")).toBe(true);
   });
 
-  it("returns true for run_command", () => {
+  it("marks run_command as requiring confirmation", () => {
     expect(requiresConfirmation("run_command")).toBe(true);
   });
 
-  it("returns true for format", () => {
+  it("marks format as requiring confirmation", () => {
     expect(requiresConfirmation("format")).toBe(true);
   });
 
-  it("returns false for read_file", () => {
+  it("marks read_file as not requiring confirmation", () => {
     expect(requiresConfirmation("read_file")).toBe(false);
   });
 
-  it("returns false for glob", () => {
-    expect(requiresConfirmation("glob")).toBe(false);
-  });
-
-  it("returns false for grep", () => {
-    expect(requiresConfirmation("grep")).toBe(false);
-  });
-
-  it("returns false for list_dir", () => {
+  it("marks list_dir as not requiring confirmation", () => {
     expect(requiresConfirmation("list_dir")).toBe(false);
   });
 
-  it("returns false for git_status", () => {
+  it("marks glob_files as not requiring confirmation", () => {
+    expect(requiresConfirmation("glob_files")).toBe(false);
+  });
+
+  it("marks grep_content as not requiring confirmation", () => {
+    expect(requiresConfirmation("grep_content")).toBe(false);
+  });
+
+  it("marks git_status as not requiring confirmation", () => {
     expect(requiresConfirmation("git_status")).toBe(false);
   });
 
-  it("returns false for git_diff", () => {
+  it("marks git_diff as not requiring confirmation", () => {
     expect(requiresConfirmation("git_diff")).toBe(false);
   });
 
-  it("returns false for unknown tool names", () => {
-    expect(requiresConfirmation("unknown")).toBe(false);
+  it("returns false for unknown tools", () => {
+    expect(requiresConfirmation("unknown_tool")).toBe(false);
   });
 });

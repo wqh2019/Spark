@@ -58,53 +58,10 @@ export class ToolRegistry {
   }
 }
 
-// Default global registry for backward compatibility with other tool modules
-const defaultRegistry = new ToolRegistry();
-
-export function registerTool(tool: Tool): void {
-  defaultRegistry.register(tool);
-}
-
-export function getTool(name: string): Tool | undefined {
-  return defaultRegistry.get(name);
-}
-
-export function getAllTools(): Tool[] {
-  return defaultRegistry.list();
-}
-
-export function getToolSchemas(): ToolSchema[] {
-  return defaultRegistry.getSchemas();
-}
-
-export interface ToolCallResult {
-  toolName: string;
-  result: string;
-  error?: boolean;
-}
-
-export async function executeTool(
-  name: string,
-  args: Record<string, unknown>,
-): Promise<ToolCallResult> {
-  const tool = getTool(name);
-  if (!tool) {
-    return { toolName: name, result: `Unknown tool: ${name}`, error: true };
-  }
-
-  try {
-    const result = await tool.execute(args);
-    return { toolName: name, result };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return { toolName: name, result: `Tool error: ${message}`, error: true };
-  }
-}
-
 /**
  * Create a fresh ToolRegistry with all built-in tools registered.
  * Uses dynamic imports to avoid circular dependency issues
- * (tool modules import from this index module).
+ * (tool modules previously imported from this index module).
  *
  * Returns a registry with 10 tools:
  *   - fileTools: read_file, write_file, edit_file, list_dir

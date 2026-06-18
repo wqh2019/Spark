@@ -17,12 +17,16 @@ program
   .option("--continue", "Continue the last session")
   .option("--session <id>", "Resume a specific session")
   .option("--model <name>", "Model to use")
+  .option("--api-key <key>", "API key (overrides OPENAI_API_KEY)")
+  .option("--base-url <url>", "API base URL (overrides OPENAI_BASE_URL)")
   .option("--auto-approve", "Skip all confirmation prompts")
   .option("--max-steps <n>", "Maximum agent steps", parseInt)
   .action(async (query, opts) => {
     let config;
     try {
       config = loadConfig({
+        apiKey: opts.apiKey,
+        baseURL: opts.baseUrl,
         model: opts.model,
         maxSteps: opts.maxSteps,
         autoApprove: opts.autoApprove ? ["*"] : undefined,

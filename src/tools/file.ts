@@ -6,14 +6,16 @@ import {
   readdirSync,
   statSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import type { Tool } from "./index.js";
-import { registerTool } from "./index.js";
+import { SafetyChecker } from "../safety.js";
 
-// Backward-compatible project dir setter (agent.ts imports this)
-// In the new design, file tools accept absolute paths directly
-export function setProjectDir(_dir: string): void {
-  // No-op: file tools now use file_path directly
+let projectDir = process.cwd();
+let safetyChecker = new SafetyChecker({ projectRoot: projectDir });
+
+export function setProjectDir(dir: string): void {
+  projectDir = dir;
+  safetyChecker = new SafetyChecker({ projectRoot: dir });
 }
 
 const DEFAULT_READ_LIMIT = 2000;
@@ -41,6 +43,12 @@ const readFile: Tool = {
     const filePath = String(args.file_path);
     const offset = typeof args.offset === "number" ? args.offset : 0;
     const limit = typeof args.limit === "number" ? args.limit : DEFAULT_READ_LIMIT;
+
+    try {
+      safetyChecker.checkPath(resolve(filePath));
+    } catch (err) {
+      return err instanceof Error ? err.message : String(err);
+    }
 
     try {
       if (!existsSync(filePath)) {
@@ -82,6 +90,12 @@ const writeFile: Tool = {
   async execute(args) {
     const filePath = String(args.file_path);
     const content = String(args.content);
+
+    try {
+      safetyChecker.checkPath(resolve(filePath));
+    } catch (err) {
+      return err instanceof Error ? err.message : String(err);
+    }
 
     try {
       const dir = dirname(filePath);
@@ -126,6 +140,12 @@ const editFile: Tool = {
     const oldStr = String(args.old_string);
     const newStr = String(args.new_string);
     const replaceAll = args.replace_all === true;
+
+    try {
+      safetyChecker.checkPath(resolve(filePath));
+    } catch (err) {
+      return err instanceof Error ? err.message : String(err);
+    }
 
     try {
       if (!existsSync(filePath)) {
@@ -173,6 +193,12 @@ const listDir: Tool = {
     const dirPath = args.dir_path ? String(args.dir_path) : ".";
 
     try {
+      safetyChecker.checkPath(resolve(dirPath));
+    } catch (err) {
+      return err instanceof Error ? err.message : String(err);
+    }
+
+    try {
       if (!existsSync(dirPath)) {
         return `Error listing directory: Directory not found: ${dirPath}`;
       }
@@ -203,8 +229,3 @@ const listDir: Tool = {
 };
 
 export const fileTools: Tool[] = [readFile, writeFile, editFile, listDir];
-
-// Auto-register with the global registry for backward compatibility
-for (const tool of fileTools) {
-  registerTool(tool);
-}

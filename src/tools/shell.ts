@@ -1,5 +1,4 @@
 import { exec } from "node:child_process";
-import { registerTool } from "./index.js";
 import type { Tool } from "./index.js";
 import { SafetyChecker } from "../safety.js";
 
@@ -66,8 +65,3 @@ const runCommand: Tool = {
 };
 
 export const shellTools: Tool[] = [runCommand];
-
-// Auto-register with the global registry for backward compatibility
-for (const tool of shellTools) {
-  registerTool(tool);
-}

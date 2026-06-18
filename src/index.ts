@@ -1,6 +1,6 @@
 export { Agent, runAgent } from './agent.js';
 export { LLMClient } from './llm.js';
-export type { LLMConfig, LLMResponse } from './llm.js';
+export type { LLMConfig } from './llm.js';
 export { ConversationMemory } from './memory.js';
 export type { Message, ToolCall } from './memory.js';
 export { loadConfig } from './config.js';

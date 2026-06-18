@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { ToolRegistry } from "../../src/tools/index.js";
 import type { Tool } from "../../src/tools/index.js";
-import { fileTools } from "../../src/tools/file.js";
+import { fileTools, setProjectDir } from "../../src/tools/file.js";
 
 // Helper to find a tool by name from the fileTools array
 function getTool(name: string): Tool {
@@ -98,6 +98,7 @@ describe("read_file", () => {
 
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), "spark-test-"));
+    setProjectDir(tempDir);
     readFile = getTool("read_file");
   });
 
@@ -145,6 +146,7 @@ describe("write_file", () => {
 
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), "spark-test-"));
+    setProjectDir(tempDir);
     writeFile = getTool("write_file");
   });
 
@@ -182,6 +184,7 @@ describe("edit_file", () => {
 
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), "spark-test-"));
+    setProjectDir(tempDir);
     editFile = getTool("edit_file");
   });
 
@@ -243,6 +246,7 @@ describe("list_dir", () => {
 
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), "spark-test-"));
+    setProjectDir(tempDir);
     listDir = getTool("list_dir");
   });
 
@@ -293,5 +297,49 @@ describe("fileTools export", () => {
     const listDir = getTool("list_dir");
     expect(readFile.requiresConfirmation).toBeFalsy();
     expect(listDir.requiresConfirmation).toBeFalsy();
+  });
+});
+
+describe("file tools path safety", () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "spark-test-"));
+    setProjectDir(tempDir);
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("read_file blocks paths outside project", async () => {
+    const readFile = getTool("read_file");
+    const result = await readFile.execute({ file_path: "/etc/passwd" });
+    expect(result).toContain("outside project");
+  });
+
+  it("write_file blocks paths outside project", async () => {
+    const writeFile = getTool("write_file");
+    const result = await writeFile.execute({
+      file_path: "/tmp/evil.txt",
+      content: "hacked",
+    });
+    expect(result).toContain("outside project");
+  });
+
+  it("edit_file blocks paths outside project", async () => {
+    const editFile = getTool("edit_file");
+    const result = await editFile.execute({
+      file_path: "/etc/hosts",
+      old_string: "a",
+      new_string: "b",
+    });
+    expect(result).toContain("outside project");
+  });
+
+  it("list_dir blocks paths outside project", async () => {
+    const listDir = getTool("list_dir");
+    const result = await listDir.execute({ dir_path: "/etc" });
+    expect(result).toContain("outside project");
   });
 });

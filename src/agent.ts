@@ -1,11 +1,11 @@
 import OpenAI from "openai";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions.js";
 import type { SparkConfig } from "./config.js";
-import { LLMClient, type LLMResponse } from "./llm.js";
+import { LLMClient } from "./llm.js";
 import { ConversationMemory, type Message, type ToolCall } from "./memory.js";
 import { ToolRegistry, createToolRegistry } from "./tools/index.js";
 import { requiresConfirmation } from "./safety.js";
-import { SYSTEM_PROMPT } from "./prompt.js";
+import { buildSystemPrompt } from "./prompt.js";
 import {
   renderTextDelta,
   renderTextComplete,
@@ -46,7 +46,7 @@ export class Agent {
     this.memory = memory ?? new ConversationMemory();
     this.maxSteps = options?.maxSteps ?? config.maxSteps;
     this.autoApprove = new Set(options?.autoApprove ?? config.autoApprove);
-    this.systemPrompt = options?.systemPrompt ?? SYSTEM_PROMPT;
+    this.systemPrompt = options?.systemPrompt ?? buildSystemPrompt(this.cwd);
     this.registry = new ToolRegistry();
 
     // Initialize tool registry asynchronously at first use
@@ -94,14 +94,28 @@ export class Agent {
       const messages = this.toOpenAIMessages(this.memory.getMessages());
       const toolSchemas = this.registry.getSchemas();
 
-      let response: LLMResponse;
+      let content = "";
+      let toolCalls: OpenAI.Chat.Completions.ChatCompletionMessageToolCall[] | undefined;
+
       try {
-        response = await this.llm.chat(
+        for await (const event of this.llm.chatStream(
           messages,
           toolSchemas.length > 0
             ? (toolSchemas as OpenAI.Chat.Completions.ChatCompletionTool[])
             : undefined,
-        );
+        )) {
+          if (event.type === "text_delta") {
+            renderTextDelta(event.data as string);
+            content += event.data;
+          } else if (event.type === "tool_call") {
+            toolCalls = event.data as OpenAI.Chat.Completions.ChatCompletionMessageToolCall[];
+          } else if (event.type === "usage") {
+            const u = event.data as { prompt_tokens: number; completion_tokens: number };
+            renderInfo(`tokens: ${u.prompt_tokens} prompt + ${u.completion_tokens} completion`);
+          } else if (event.type === "done") {
+            content = (event.data as { content: string }).content ?? content;
+          }
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         renderError(msg);
@@ -109,15 +123,12 @@ export class Agent {
       }
       renderTextComplete();
 
-      const assistantContent = response.content ?? "";
-      const toolCalls = response.toolCalls;
-
-      this.memory.addMessage("assistant", assistantContent, {
+      this.memory.addMessage("assistant", content, {
         tool_calls: toolCalls,
       });
 
       if (!toolCalls || toolCalls.length === 0) {
-        return assistantContent;
+        return content;
       }
 
       // Execute tool calls sequentially

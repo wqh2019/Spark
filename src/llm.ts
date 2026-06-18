@@ -13,6 +13,11 @@ export interface LLMResponse {
   usage?: { prompt_tokens: number; completion_tokens: number };
 }
 
+export interface StreamUsage {
+  prompt_tokens: number;
+  completion_tokens: number;
+}
+
 export class LLMClient {
   readonly client: OpenAI;
   readonly model: string;
@@ -60,7 +65,7 @@ export class LLMClient {
     messages: ChatCompletionMessageParam[],
     tools?: OpenAI.Chat.Completions.ChatCompletionTool[],
   ): AsyncGenerator<
-    { type: "text_delta" | "tool_call" | "done"; data?: unknown }
+    { type: "text_delta" | "tool_call" | "usage" | "done"; data?: unknown }
   > {
     const params: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
       model: this.model,
@@ -81,6 +86,17 @@ export class LLMClient {
     >();
 
     for await (const chunk of stream) {
+      // The final chunk carries usage info when stream_options.include_usage is true
+      if (chunk.usage) {
+        yield {
+          type: "usage",
+          data: {
+            prompt_tokens: chunk.usage.prompt_tokens,
+            completion_tokens: chunk.usage.completion_tokens,
+          },
+        };
+      }
+
       const delta = chunk.choices[0]?.delta;
       if (!delta) continue;
 

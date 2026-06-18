@@ -1,4 +1,4 @@
-export const CODING_SYSTEM_PROMPT = `You are Spark, an expert coding assistant running in the user's terminal.
+const CODING_SYSTEM_PROMPT = `You are Spark, an expert coding assistant running in the user's terminal.
 
 You can read and write files, execute shell commands, search code, and run development tools.
 
@@ -25,10 +25,6 @@ You operate in the user's current working directory. All file paths are relative
 - Some operations require user confirmation (writing files, editing files, running commands)
 - The user can auto-approve operations with the --auto-approve flag
 - Never attempt to bypass safety checks`;
-
-export const SYSTEM_PROMPT = `${CODING_SYSTEM_PROMPT}
-
-Current working directory: ${process.cwd()}`;
 
 export function buildSystemPrompt(cwd: string): string {
   return `${CODING_SYSTEM_PROMPT}\n\nCurrent working directory: ${cwd}`;
