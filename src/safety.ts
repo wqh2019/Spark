@@ -72,6 +72,7 @@ const CONFIRMATION_REQUIRED = new Set([
   "edit_file",
   "run_command",
   "format",
+  "lint",
 ]);
 
 /**

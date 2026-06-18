@@ -7,7 +7,7 @@ import { LLMClient } from '../src/llm.js';
 import { Agent } from '../src/agent.js';
 
 describe('integration', () => {
-  it('tool registry contains all 10 expected tools', async () => {
+  it('tool registry contains all 12 expected tools', async () => {
     const registry = await createToolRegistry();
     const names = registry.list().map(t => t.name).sort();
     expect(names).toEqual([
@@ -17,12 +17,14 @@ describe('integration', () => {
       'git_status',
       'glob_files',
       'grep_content',
+      'lint',
       'list_dir',
       'read_file',
       'run_command',
+      'test',
       'write_file',
     ]);
-    expect(names).toHaveLength(10);
+    expect(names).toHaveLength(12);
   });
 
   it('confirmation flags match design spec', () => {

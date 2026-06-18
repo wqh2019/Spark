@@ -12,27 +12,25 @@ function getTool(name: string): Tool {
 }
 
 describe("devTools export", () => {
-  it("exports all 3 dev tools", () => {
+  it("exports all 5 dev tools", () => {
     const names = devTools.map((t) => t.name);
     expect(names).toContain("git_status");
     expect(names).toContain("git_diff");
     expect(names).toContain("format");
-    expect(devTools).toHaveLength(3);
+    expect(names).toContain("lint");
+    expect(names).toContain("test");
+    expect(devTools).toHaveLength(5);
   });
 
-  it("format requires confirmation", () => {
-    const format = getTool("format");
-    expect(format.requiresConfirmation).toBe(true);
+  it("format and lint require confirmation", () => {
+    expect(getTool("format").requiresConfirmation).toBe(true);
+    expect(getTool("lint").requiresConfirmation).toBe(true);
   });
 
-  it("git_status does not require confirmation", () => {
-    const gitStatus = getTool("git_status");
-    expect(gitStatus.requiresConfirmation).toBeFalsy();
-  });
-
-  it("git_diff does not require confirmation", () => {
-    const gitDiff = getTool("git_diff");
-    expect(gitDiff.requiresConfirmation).toBeFalsy();
+  it("git_status, git_diff, and test do not require confirmation", () => {
+    expect(getTool("git_status").requiresConfirmation).toBeFalsy();
+    expect(getTool("git_diff").requiresConfirmation).toBeFalsy();
+    expect(getTool("test").requiresConfirmation).toBeFalsy();
   });
 });
 
@@ -108,6 +106,21 @@ describe("format tool skips when no config", () => {
       const format = getTool("format");
       const result = await format.execute({});
       expect(result).toContain("No prettier or eslint configuration found");
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+      setDevProjectDir(process.cwd());
+    }
+  });
+});
+
+describe("lint tool skips when no eslint config", () => {
+  it("returns skip message when no eslint config found", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "spark-test-"));
+    setDevProjectDir(tempDir);
+    try {
+      const lint = getTool("lint");
+      const result = await lint.execute({});
+      expect(result).toContain("No eslint configuration found");
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
       setDevProjectDir(process.cwd());

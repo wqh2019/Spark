@@ -122,6 +122,10 @@ describe("SafetyChecker", () => {
     expect(requiresConfirmation("format")).toBe(true);
   });
 
+  it("marks lint as requiring confirmation", () => {
+    expect(requiresConfirmation("lint")).toBe(true);
+  });
+
   it("marks read_file as not requiring confirmation", () => {
     expect(requiresConfirmation("read_file")).toBe(false);
   });
@@ -144,6 +148,10 @@ describe("SafetyChecker", () => {
 
   it("marks git_diff as not requiring confirmation", () => {
     expect(requiresConfirmation("git_diff")).toBe(false);
+  });
+
+  it("marks test as not requiring confirmation", () => {
+    expect(requiresConfirmation("test")).toBe(false);
   });
 
   it("returns false for unknown tools", () => {

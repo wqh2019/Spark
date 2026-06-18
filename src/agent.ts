@@ -152,7 +152,7 @@ export class Agent {
     const needsConfirm =
       tool?.requiresConfirmation ?? requiresConfirmation(tc.function.name);
 
-    if (needsConfirm && !this.approveAll && !this.autoApprove.has(tc.function.name)) {
+    if (needsConfirm && !this.approveAll && !this.autoApprove.has("*") && !this.autoApprove.has(tc.function.name)) {
       const result = await confirmAction(`Allow ${tc.function.name}?`);
       if (result === "all") {
         this.approveAll = true;

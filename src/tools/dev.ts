@@ -98,4 +98,29 @@ const format: Tool = {
   },
 };
 
-export const devTools: Tool[] = [gitStatus, gitDiff, format];
+const lint: Tool = {
+  name: "lint",
+  description:
+    "Run eslint to check for issues. Detects project eslint config; skips if none found.",
+  parameters: {},
+  requiresConfirmation: true,
+  async execute() {
+    const { eslint: hasEslint } = detectFormatterConfigs(projectDir);
+    if (!hasEslint) {
+      return "No eslint configuration found. Skipping lint.";
+    }
+    return runExec("npx eslint .");
+  },
+};
+
+const testTool: Tool = {
+  name: "test",
+  description: "Run project tests using npm test.",
+  parameters: {},
+  requiresConfirmation: false,
+  async execute() {
+    return runExec("npm test", 60_000);
+  },
+};
+
+export const devTools: Tool[] = [gitStatus, gitDiff, format, lint, testTool];

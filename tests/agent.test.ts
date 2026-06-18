@@ -266,4 +266,61 @@ describe("Agent", () => {
       expect.stringContaining('unknown tool "nonexistent_tool"'),
     );
   });
+
+  it("auto-approve wildcard '*' skips confirmation for all tools", async () => {
+    const { confirmAction } = await import("../src/render.js");
+    const agent = new Agent(makeConfig({ autoApprove: ["*"] }), undefined);
+
+    let callCount = 0;
+    agent["llm"].chatStream = (async function* () {
+      callCount++;
+      if (callCount === 1) {
+        yield { type: "tool_call", data: [{ id: "call_1", type: "function", function: { name: "write_file", arguments: '{"file_path":"test.txt","content":"hi"}' } }] };
+        yield { type: "done", data: { content: "" } };
+      } else {
+        yield { type: "text_delta", data: "Done" };
+        yield { type: "done", data: { content: "Done" } };
+      }
+    }) as any;
+
+    agent["registry"].register({
+      name: "write_file",
+      description: "Write a file",
+      parameters: { file_path: { type: "string" }, content: { type: "string" } },
+      requiresConfirmation: true,
+      execute: async () => "ok",
+    });
+
+    await agent.run("Write a file");
+    // confirmAction should NOT be called because "*" auto-approves everything
+    expect(confirmAction).not.toHaveBeenCalled();
+  });
+
+  it("auto-approve specific tool name skips confirmation for that tool only", async () => {
+    const { confirmAction } = await import("../src/render.js");
+    const agent = new Agent(makeConfig({ autoApprove: ["read_file"] }), undefined);
+
+    let callCount = 0;
+    agent["llm"].chatStream = (async function* () {
+      callCount++;
+      if (callCount === 1) {
+        yield { type: "tool_call", data: [{ id: "call_1", type: "function", function: { name: "read_file", arguments: '{"file_path":"test.txt"}' } }] };
+        yield { type: "done", data: { content: "" } };
+      } else {
+        yield { type: "text_delta", data: "Done" };
+        yield { type: "done", data: { content: "Done" } };
+      }
+    }) as any;
+
+    agent["registry"].register({
+      name: "read_file",
+      description: "Read a file",
+      parameters: { file_path: { type: "string" } },
+      requiresConfirmation: false,
+      execute: async () => "ok",
+    });
+
+    await agent.run("Read a file");
+    expect(confirmAction).not.toHaveBeenCalled();
+  });
 });
