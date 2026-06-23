@@ -140,10 +140,8 @@ export class Agent {
         return content;
       }
 
-      // Execute tool calls sequentially
-      for (const tc of toolCalls) {
-        await this.executeToolCall(tc);
-      }
+      // Execute tool calls in parallel
+      await this.executeToolCalls(toolCalls);
     }
 
     const limitMsg = `Reached maximum steps (${this.maxSteps}). Task may be incomplete.`;
@@ -151,47 +149,108 @@ export class Agent {
     return limitMsg;
   }
 
-  private async executeToolCall(
-    tc: OpenAI.Chat.Completions.ChatCompletionMessageToolCall,
+  private async executeToolCalls(
+    toolCalls: OpenAI.Chat.Completions.ChatCompletionMessageToolCall[],
   ): Promise<void> {
-    const args = this.parseArgs(tc.function.arguments);
-    renderToolStart(tc.function.name, args);
+    // Phase 1: Confirmation (serial)
+    const decisions = await this.confirmTools(toolCalls);
 
-    const tool = this.registry.get(tc.function.name);
-    const needsConfirm =
-      tool?.requiresConfirmation ?? requiresConfirmation(tc.function.name);
+    // Phase 2: Execution (parallel)
+    const results = await Promise.all(
+      toolCalls.map((tc, i) => this.runToolCall(tc, decisions[i])),
+    );
 
-    if (needsConfirm && !this.approveAll && !this.autoApprove.has("*") && !this.autoApprove.has(tc.function.name)) {
+    // Phase 3: Render + memory write (serial, in original order)
+    for (let i = 0; i < toolCalls.length; i++) {
+      const tc = toolCalls[i];
+      const { result, isError, denied } = results[i];
+      if (isError && !denied) {
+        renderError(result);
+      }
+      renderToolResult(tc.function.name, result, isError);
+      this.memory.addMessage("tool", result, {
+        tool_call_id: tc.id,
+      });
+    }
+  }
+
+  private async confirmTools(
+    toolCalls: OpenAI.Chat.Completions.ChatCompletionMessageToolCall[],
+  ): Promise<Array<"approved" | "denied">> {
+    const decisions: Array<"approved" | "denied"> = [];
+
+    for (const tc of toolCalls) {
+      const tool = this.registry.get(tc.function.name);
+      const needsConfirm =
+        tool?.requiresConfirmation ?? requiresConfirmation(tc.function.name);
+
+      if (
+        !needsConfirm ||
+        this.approveAll ||
+        this.autoApprove.has("*") ||
+        this.autoApprove.has(tc.function.name)
+      ) {
+        decisions.push("approved");
+        continue;
+      }
+
+      // Needs confirmation — render start info so user can see args before deciding
+      const args = this.parseArgs(tc.function.arguments);
+      renderToolStart(tc.function.name, args);
+
       const result = await confirmAction(`Allow ${tc.function.name}?`);
       if (result === "all") {
         this.approveAll = true;
+        decisions.push("approved");
       } else if (result === false) {
-        const denyMsg = `User denied ${tc.function.name} execution.`;
-        this.memory.addMessage("tool", denyMsg, {
-          tool_call_id: tc.id,
-        });
-        renderToolResult(tc.function.name, "Denied by user", true);
-        return;
+        decisions.push("denied");
+      } else {
+        decisions.push("approved");
       }
     }
 
+    return decisions;
+  }
+
+  private async runToolCall(
+    tc: OpenAI.Chat.Completions.ChatCompletionMessageToolCall,
+    decision: "approved" | "denied",
+  ): Promise<{ result: string; isError: boolean; denied?: boolean }> {
+    if (decision === "denied") {
+      return { result: "Denied by user", isError: true, denied: true };
+    }
+
+    const args = this.parseArgs(tc.function.arguments);
+
+    // For tools that didn't render start in confirmTools, render it now
+    const tool = this.registry.get(tc.function.name);
+    const needsConfirm =
+      tool?.requiresConfirmation ?? requiresConfirmation(tc.function.name);
+    if (
+      !needsConfirm ||
+      this.approveAll ||
+      this.autoApprove.has("*") ||
+      this.autoApprove.has(tc.function.name)
+    ) {
+      renderToolStart(tc.function.name, args);
+    }
+
     let execResult: string;
+    let isError = false;
+
     if (tool) {
       try {
         execResult = await tool.execute(args);
       } catch (err: any) {
         execResult = `Error executing ${tc.function.name}: ${err.message}`;
-        renderError(execResult);
+        isError = true;
       }
     } else {
       execResult = `Error: unknown tool "${tc.function.name}"`;
-      renderError(execResult);
+      isError = true;
     }
 
-    renderToolResult(tc.function.name, execResult);
-    this.memory.addMessage("tool", execResult, {
-      tool_call_id: tc.id,
-    });
+    return { result: execResult, isError };
   }
 
   private parseArgs(argsStr: string): Record<string, unknown> {
