@@ -1,8 +1,23 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+
+// Mock node:fs so fileConfig fallback can be tested deterministically.
+// vi.fn() defaults return undefined, so existsSync() is falsy -> loadConfigFile
+// returns {} for existing tests (they expect env/CLI/default values).
+vi.mock("node:fs", () => ({
+  existsSync: vi.fn(),
+  readFileSync: vi.fn(),
+  mkdirSync: vi.fn(),
+}));
+
+import * as fs from "node:fs";
 import { loadConfig } from "../src/config.js";
 
 describe("loadConfig", () => {
   const originalEnv = { ...process.env };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
 
   afterEach(() => {
     process.env = { ...originalEnv };
@@ -93,6 +108,33 @@ describe("loadConfig", () => {
     process.env.SPARK_AUTO_APPROVE = "  ,  ,  ";
 
     const config = loadConfig();
+    expect(config.autoApprove).toEqual([]);
+  });
+
+  it("falls back to fileConfig.autoApprove when env not set", () => {
+    process.env.OPENAI_API_KEY = "test-key";
+    delete process.env.SPARK_AUTO_APPROVE;
+
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({ autoApprove: ["read_file"] }),
+    );
+
+    const config = loadConfig();
+    expect(config.autoApprove).toEqual(["read_file"]);
+  });
+
+  it("env empty string overrides fileConfig autoApprove", () => {
+    process.env.OPENAI_API_KEY = "test-key";
+    process.env.SPARK_AUTO_APPROVE = "";
+
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({ autoApprove: ["read_file"] }),
+    );
+
+    const config = loadConfig();
+    // Explicit empty env value should override fileConfig (not fall back)
     expect(config.autoApprove).toEqual([]);
   });
 });

@@ -23,8 +23,8 @@ function loadConfigFile(): Partial<SparkConfig> {
   }
 }
 
-function parseAutoApprove(value: string | undefined): string[] {
-  if (!value) return [];
+function parseAutoApprove(value: string | undefined): string[] | undefined {
+  if (value === undefined) return undefined;
   return value
     .split(",")
     .map((s) => s.trim())

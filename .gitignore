@@ -9,4 +9,5 @@ logs/
 .CLAUDE.md
 .idea/
 .vscode/
+.workbuddy/
 docs/

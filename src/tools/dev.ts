@@ -1,31 +1,62 @@
-import { exec } from "node:child_process";
+import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import type { Tool } from "./index.js";
+import { SafetyChecker } from "../safety.js";
 
 let projectDir = process.cwd();
+let safetyChecker = new SafetyChecker({ projectRoot: projectDir });
 
 export function setDevProjectDir(dir: string): void {
   projectDir = dir;
+  safetyChecker = new SafetyChecker({ projectRoot: dir });
 }
 
-function runExec(command: string, timeout = 30_000): Promise<string> {
-  return new Promise((resolve) => {
-    exec(
-      command,
-      { cwd: projectDir, timeout, maxBuffer: 1024 * 1024 },
+const isWindows = process.platform === "win32";
+
+// git refs: branch / commit SHA / tag / HEAD / origin/main / v1.0.0
+// Rejects shell metacharacters AND git option injection (e.g. --output=).
+const GIT_REF_PATTERN = /^[A-Za-z0-9_][A-Za-z0-9_./-]*$/;
+// Windows cmd dangerous characters (only checked on Windows where npx/npm run
+// with shell:true). Spaces, unicode, parentheses, and # are allowed.
+const WIN_SHELL_META = /[&|<>"^%]/;
+
+function runExec(file: string, args: string[], timeout = 30_000): Promise<string> {
+  // npm/npx are .cmd scripts on Windows and require shell:true (Node CVE hardening).
+  // git is a real binary and runs without a shell on every platform.
+  const useShell = isWindows && (file === "npm" || file === "npx");
+  return new Promise((resolvePromise) => {
+    execFile(
+      file,
+      args,
+      { cwd: projectDir, timeout, maxBuffer: 1024 * 1024, shell: useShell },
       (error, stdout, stderr) => {
         if (error) {
-          resolve(`Error: ${error.message}`);
+          resolvePromise(`Error: ${error.message}`);
           return;
         }
         let output = "";
         if (stdout) output += stdout;
         if (stderr) output += (output ? "\n" : "") + stderr;
-        resolve(output || "(no output)");
+        resolvePromise(output || "(no output)");
       },
     );
   });
+}
+
+// Validates a file/directory path argument: must stay inside the project
+// sandbox, and on Windows must not carry cmd metacharacters. Returns an error
+// message string when invalid, or null when valid.
+function validatePathArg(target: string): string | null {
+  try {
+    safetyChecker.checkPath(resolve(projectDir, target));
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
+  if (isWindows && WIN_SHELL_META.test(target)) {
+    return `Error: path contains shell metacharacters: ${target}`;
+  }
+  return null;
 }
 
 const gitStatus: Tool = {
@@ -34,7 +65,7 @@ const gitStatus: Tool = {
   parameters: {},
   requiresConfirmation: false,
   async execute() {
-    return runExec("git status");
+    return runExec("git", ["status"]);
   },
 };
 
@@ -50,7 +81,10 @@ const gitDiff: Tool = {
   requiresConfirmation: false,
   async execute(args) {
     const target = args.target ? String(args.target) : "HEAD";
-    return runExec(`git diff ${target}`);
+    if (!GIT_REF_PATTERN.test(target)) {
+      return `Error: invalid git ref (rejected): ${target}`;
+    }
+    return runExec("git", ["diff", target]);
   },
 };
 
@@ -94,15 +128,18 @@ const format: Tool = {
       return "No prettier or eslint configuration found. Skipping format.";
     }
 
+    const pathError = validatePathArg(target);
+    if (pathError) return pathError;
+
     const results: string[] = [];
 
     if (hasPrettier) {
-      const prettierResult = await runExec(`npx prettier --write ${target}`);
+      const prettierResult = await runExec("npx", ["prettier", "--write", target]);
       results.push(`[prettier]\n${prettierResult}`);
     }
 
     if (hasEslint) {
-      const eslintResult = await runExec(`npx eslint --fix ${target}`);
+      const eslintResult = await runExec("npx", ["eslint", "--fix", target]);
       results.push(`[eslint]\n${eslintResult}`);
     }
 
@@ -127,7 +164,9 @@ const lint: Tool = {
       return "No eslint configuration found. Skipping lint.";
     }
     const target = args.path ? String(args.path) : ".";
-    return runExec(`npx eslint ${target}`);
+    const pathError = validatePathArg(target);
+    if (pathError) return pathError;
+    return runExec("npx", ["eslint", target]);
   },
 };
 
@@ -137,7 +176,7 @@ const testTool: Tool = {
   parameters: {},
   requiresConfirmation: false,
   async execute() {
-    return runExec("npm test", 60_000);
+    return runExec("npm", ["test"], 60_000);
   },
 };
 

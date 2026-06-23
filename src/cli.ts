@@ -6,6 +6,7 @@ import { Agent } from "./agent.js";
 import { loadConfig } from "./config.js";
 import { ConversationMemory, listSessions, getLatestSessionId } from "./memory.js";
 import { renderError, renderInfo } from "./render.js";
+import { runWithSignal } from "./run-with-signal.js";
 
 const program = new Command();
 
@@ -58,7 +59,7 @@ program
     const agent = new Agent(config, memory);
 
     if (query) {
-      await agent.run(query);
+      await runWithSignal(agent, query);
       return;
     }
 
@@ -103,6 +104,13 @@ program
     }
   });
 
+/**
+ * Run a single agent turn with SIGINT (Ctrl+C) wired to an AbortController so
+ * the user can interrupt long-running queries gracefully. The SIGINT listener
+ * is always removed afterwards (on success, error, or interruption).
+ */
+export { runWithSignal } from "./run-with-signal.js";
+
 async function interactiveLoop(agent: Agent): Promise<void> {
   const rl = createInterface({
     input: process.stdin,
@@ -141,17 +149,7 @@ async function interactiveLoop(agent: Agent): Promise<void> {
       if (!message.trim()) continue;
     }
 
-    const controller = new AbortController();
-    const onSigInt = () => controller.abort();
-    process.once("SIGINT", onSigInt);
-
-    try {
-      await agent.run(message, controller.signal);
-    } catch (err) {
-      renderError(err instanceof Error ? err.message : String(err));
-    } finally {
-      process.removeListener("SIGINT", onSigInt);
-    }
+    await runWithSignal(agent, message);
   }
 }
 
