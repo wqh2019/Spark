@@ -10,12 +10,20 @@ import {
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { ToolRegistry } from "../../src/tools/index.js";
-import type { Tool } from "../../src/tools/index.js";
-import { fileTools, setProjectDir } from "../../src/tools/file.js";
+import type { Tool, ToolContext } from "../../src/tools/index.js";
+import { createFileTools } from "../../src/tools/file.js";
+import { SafetyChecker } from "../../src/safety.js";
 
-// Helper to find a tool by name from the fileTools array
-function getTool(name: string): Tool {
-  const tool = fileTools.find((t) => t.name === name);
+function makeContext(dir: string, maxFileSize?: number): ToolContext {
+  return {
+    projectDir: dir,
+    safetyChecker: new SafetyChecker({ projectRoot: dir, maxFileSize }),
+  };
+}
+
+// Helper to find a tool by name from a tools array
+function getTool(tools: Tool[], name: string): Tool {
+  const tool = tools.find((t) => t.name === name);
   if (!tool) throw new Error(`Tool not found: ${name}`);
   return tool;
 }
@@ -90,6 +98,20 @@ describe("ToolRegistry", () => {
       },
     });
   });
+
+  it("unregister removes a tool", () => {
+    const tool: Tool = {
+      name: "test_tool",
+      description: "A test tool",
+      parameters: {},
+      execute: async () => "ok",
+    };
+    registry.register(tool);
+    expect(registry.has("test_tool")).toBe(true);
+    expect(registry.unregister("test_tool")).toBe(true);
+    expect(registry.has("test_tool")).toBe(false);
+    expect(registry.unregister("nonexistent")).toBe(false);
+  });
 });
 
 describe("read_file", () => {
@@ -98,8 +120,8 @@ describe("read_file", () => {
 
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), "spark-test-"));
-    setProjectDir(tempDir);
-    readFile = getTool("read_file");
+    const ctx = makeContext(tempDir);
+    readFile = getTool(createFileTools(ctx), "read_file");
   });
 
   afterEach(() => {
@@ -110,7 +132,6 @@ describe("read_file", () => {
     const filePath = join(tempDir, "test.txt");
     writeFileSync(filePath, "hello\nworld");
     const result = await readFile.execute({ file_path: filePath });
-    // Format: right-padded line number + tab + content
     expect(result).toContain("1\thello");
     expect(result).toContain("2\tworld");
   });
@@ -131,7 +152,6 @@ describe("read_file", () => {
       offset: 2,
       limit: 3,
     });
-    // Should show lines 3-5 (offset is 0-based from spec: defaults 0)
     expect(result).toContain("3\tline 3");
     expect(result).toContain("4\tline 4");
     expect(result).toContain("5\tline 5");
@@ -146,8 +166,8 @@ describe("write_file", () => {
 
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), "spark-test-"));
-    setProjectDir(tempDir);
-    writeFile = getTool("write_file");
+    const ctx = makeContext(tempDir);
+    writeFile = getTool(createFileTools(ctx), "write_file");
   });
 
   afterEach(() => {
@@ -184,8 +204,8 @@ describe("edit_file", () => {
 
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), "spark-test-"));
-    setProjectDir(tempDir);
-    editFile = getTool("edit_file");
+    const ctx = makeContext(tempDir);
+    editFile = getTool(createFileTools(ctx), "edit_file");
   });
 
   afterEach(() => {
@@ -242,7 +262,6 @@ describe("edit_file", () => {
 
     it("handles CRLF line endings in string replacement", async () => {
       const filePath = join(tempDir, "crlf.txt");
-      // Write file with CRLF line endings
       writeFileSync(filePath, "line1\r\nline2\r\nline3");
       const result = await editFile.execute({
         file_path: filePath,
@@ -330,8 +349,8 @@ describe("list_dir", () => {
 
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), "spark-test-"));
-    setProjectDir(tempDir);
-    listDir = getTool("list_dir");
+    const ctx = makeContext(tempDir);
+    listDir = getTool(createFileTools(ctx), "list_dir");
   });
 
   afterEach(() => {
@@ -347,7 +366,6 @@ describe("list_dir", () => {
   });
 
   it("defaults to current directory when no path given", async () => {
-    // Just verify it doesn't throw - it will list the actual CWD
     const result = await listDir.execute({});
     expect(typeof result).toBe("string");
   });
@@ -359,28 +377,30 @@ describe("list_dir", () => {
   });
 });
 
-describe("fileTools export", () => {
+describe("createFileTools export", () => {
   it("exports all 4 file tools", () => {
-    const names = fileTools.map((t) => t.name);
+    const ctx = makeContext(process.cwd());
+    const tools = createFileTools(ctx);
+    const names = tools.map((t) => t.name);
     expect(names).toContain("read_file");
     expect(names).toContain("write_file");
     expect(names).toContain("edit_file");
     expect(names).toContain("list_dir");
-    expect(fileTools).toHaveLength(4);
+    expect(tools).toHaveLength(4);
   });
 
   it("write_file and edit_file require confirmation", () => {
-    const writeFile = getTool("write_file");
-    const editFile = getTool("edit_file");
-    expect(writeFile.requiresConfirmation).toBe(true);
-    expect(editFile.requiresConfirmation).toBe(true);
+    const ctx = makeContext(process.cwd());
+    const tools = createFileTools(ctx);
+    expect(getTool(tools, "write_file").requiresConfirmation).toBe(true);
+    expect(getTool(tools, "edit_file").requiresConfirmation).toBe(true);
   });
 
   it("read_file and list_dir do not require confirmation", () => {
-    const readFile = getTool("read_file");
-    const listDir = getTool("list_dir");
-    expect(readFile.requiresConfirmation).toBeFalsy();
-    expect(listDir.requiresConfirmation).toBeFalsy();
+    const ctx = makeContext(process.cwd());
+    const tools = createFileTools(ctx);
+    expect(getTool(tools, "read_file").requiresConfirmation).toBeFalsy();
+    expect(getTool(tools, "list_dir").requiresConfirmation).toBeFalsy();
   });
 });
 
@@ -389,7 +409,6 @@ describe("file tools path safety", () => {
 
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), "spark-test-"));
-    setProjectDir(tempDir);
   });
 
   afterEach(() => {
@@ -397,13 +416,15 @@ describe("file tools path safety", () => {
   });
 
   it("read_file blocks paths outside project", async () => {
-    const readFile = getTool("read_file");
+    const ctx = makeContext(tempDir);
+    const readFile = getTool(createFileTools(ctx), "read_file");
     const result = await readFile.execute({ file_path: "/etc/passwd" });
     expect(result).toContain("outside project");
   });
 
   it("write_file blocks paths outside project", async () => {
-    const writeFile = getTool("write_file");
+    const ctx = makeContext(tempDir);
+    const writeFile = getTool(createFileTools(ctx), "write_file");
     const result = await writeFile.execute({
       file_path: "/tmp/evil.txt",
       content: "hacked",
@@ -412,7 +433,8 @@ describe("file tools path safety", () => {
   });
 
   it("edit_file blocks paths outside project", async () => {
-    const editFile = getTool("edit_file");
+    const ctx = makeContext(tempDir);
+    const editFile = getTool(createFileTools(ctx), "edit_file");
     const result = await editFile.execute({
       file_path: "/etc/hosts",
       old_string: "a",
@@ -422,7 +444,8 @@ describe("file tools path safety", () => {
   });
 
   it("list_dir blocks paths outside project", async () => {
-    const listDir = getTool("list_dir");
+    const ctx = makeContext(tempDir);
+    const listDir = getTool(createFileTools(ctx), "list_dir");
     const result = await listDir.execute({ dir_path: "/etc" });
     expect(result).toContain("outside project");
   });
@@ -433,8 +456,6 @@ describe("file tools file size check", () => {
 
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), "spark-test-"));
-    // Set a very small max file size to trigger the check
-    setProjectDir(tempDir, 50);
   });
 
   afterEach(() => {
@@ -442,8 +463,8 @@ describe("file tools file size check", () => {
   });
 
   it("read_file blocks oversized files", async () => {
-    const readFile = getTool("read_file");
-    // Write a file larger than 50 bytes
+    const ctx = makeContext(tempDir, 50);
+    const readFile = getTool(createFileTools(ctx), "read_file");
     const filePath = join(tempDir, "big.txt");
     writeFileSync(filePath, "x".repeat(100));
     const result = await readFile.execute({ file_path: filePath });
@@ -451,7 +472,8 @@ describe("file tools file size check", () => {
   });
 
   it("edit_file blocks oversized files", async () => {
-    const editFile = getTool("edit_file");
+    const ctx = makeContext(tempDir, 50);
+    const editFile = getTool(createFileTools(ctx), "edit_file");
     const filePath = join(tempDir, "big.txt");
     writeFileSync(filePath, "x".repeat(100));
     const result = await editFile.execute({

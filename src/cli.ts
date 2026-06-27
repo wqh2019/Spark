@@ -4,8 +4,9 @@ import { Command } from "commander";
 import { createInterface } from "node:readline";
 import { Agent } from "./agent.js";
 import { loadConfig } from "./config.js";
+import { LogLevel, setLogLevel } from "./logger.js";
 import { ConversationMemory, listSessions, getLatestSessionId } from "./memory.js";
-import { renderError, renderInfo } from "./render.js";
+import { renderError, renderInfo, closeConfirmReadline } from "./render.js";
 import { runWithSignal } from "./run-with-signal.js";
 
 const program = new Command();
@@ -21,8 +22,14 @@ program
   .option("--api-key <key>", "API key (overrides OPENAI_API_KEY)")
   .option("--base-url <url>", "API base URL (overrides OPENAI_BASE_URL)")
   .option("--auto-approve", "Skip all confirmation prompts")
+  .option("--verbose", "Enable verbose debug logging")
   .option("--max-steps <n>", "Maximum agent steps", parseInt)
   .action(async (query, opts) => {
+    // Set log level before anything else
+    if (opts.verbose) {
+      setLogLevel(LogLevel.DEBUG);
+    }
+
     let config;
     try {
       config = loadConfig({
@@ -154,3 +161,6 @@ async function interactiveLoop(agent: Agent): Promise<void> {
 }
 
 program.parse();
+
+// Cleanup: close the shared confirm readline on exit
+process.on("exit", () => closeConfirmReadline());

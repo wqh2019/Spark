@@ -7,6 +7,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { getSessionsDir } from "./config.js";
+import { logger } from "./logger.js";
 
 export interface Message {
   role: "system" | "user" | "assistant" | "tool";
@@ -146,8 +147,10 @@ export class ConversationMemory {
         JSON.stringify(message) + "\n",
         "utf-8",
       );
-    } catch {
-      // Silent fail for persistence
+    } catch (err) {
+      logger.warn(
+        `Failed to persist message: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 
@@ -156,8 +159,10 @@ export class ConversationMemory {
       const lines =
         this.messages.map((m) => JSON.stringify(m)).join("\n") + "\n";
       writeFileSync(this.sessionFile, lines, "utf-8");
-    } catch {
-      // Silent fail for persistence
+    } catch (err) {
+      logger.warn(
+        `Failed to persist all messages: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 }

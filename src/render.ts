@@ -45,18 +45,29 @@ export function renderInfo(message: string): void {
 
 export type ConfirmResult = boolean | "all";
 
+// Lazy singleton readline for confirm prompts (D5: avoid creating new readline each time)
+let _confirmRL: import("node:readline").Interface | null = null;
+
+export function closeConfirmReadline(): void {
+  if (_confirmRL) {
+    _confirmRL.close();
+    _confirmRL = null;
+  }
+}
+
 export async function confirmAction(
   message: string,
 ): Promise<ConfirmResult> {
-  const readline = await import("node:readline");
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stderr,
-  });
+  if (!_confirmRL) {
+    const readline = await import("node:readline");
+    _confirmRL = readline.createInterface({
+      input: process.stdin,
+      output: process.stderr,
+    });
+  }
 
   return new Promise((resolve) => {
-    rl.question(chalk.yellow(`${message} [y/n/a]: `), (answer) => {
-      rl.close();
+    _confirmRL!.question(chalk.yellow(`${message} [y/n/a]: `), (answer) => {
       const lower = answer.trim().toLowerCase();
       if (lower === "a" || lower === "all") {
         resolve("all");

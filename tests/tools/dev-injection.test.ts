@@ -7,15 +7,25 @@ vi.mock("node:child_process", () => ({
 }));
 
 import { execFile } from "node:child_process";
-import { devTools, setDevProjectDir } from "../../src/tools/dev.js";
+import { createDevTools } from "../../src/tools/dev.js";
+import type { ToolContext } from "../../src/tools/index.js";
+import type { Tool } from "../../src/tools/index.js";
+import { SafetyChecker } from "../../src/safety.js";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 const isWindows = process.platform === "win32";
 
-function getTool(name: string) {
-  const t = devTools.find((x) => x.name === name);
+function makeContext(dir: string): ToolContext {
+  return {
+    projectDir: dir,
+    safetyChecker: new SafetyChecker({ projectRoot: dir }),
+  };
+}
+
+function getTool(tools: Tool[], name: string): Tool {
+  const t = tools.find((x) => x.name === name);
   if (!t) throw new Error(`Tool not found: ${name}`);
   return t;
 }
@@ -26,7 +36,7 @@ function mockExecFileResult(result: {
   stdout?: string;
   stderr?: string;
 }): void {
-  vi.mocked(execFile).mockImplementation(((
+  vi.mocked(execFile).mockImplementation((((
     _file: string,
     _args: string[],
     _opts: unknown,
@@ -34,7 +44,7 @@ function mockExecFileResult(result: {
   ) => {
     cb(result.err ?? null, result.stdout ?? "", result.stderr ?? "");
     return undefined as unknown as import("node:child_process").ChildProcess;
-  }) as unknown as typeof execFile);
+  }) as unknown) as typeof execFile);
 }
 
 describe("devTools command injection guards", () => {
@@ -43,24 +53,26 @@ describe("devTools command injection guards", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     tempDir = mkdtempSync(join(tmpdir(), "spark-inj-"));
-    setDevProjectDir(tempDir);
   });
 
   afterEach(() => {
     rmSync(tempDir, { recursive: true, force: true });
-    setDevProjectDir(process.cwd());
   });
 
   describe("git_diff", () => {
     it("rejects shell injection in target", async () => {
-      const gitDiff = getTool("git_diff");
+      const ctx = makeContext(tempDir);
+      const tools = createDevTools(ctx);
+      const gitDiff = getTool(tools, "git_diff");
       const result = await gitDiff.execute({ target: "HEAD; rm -rf /" });
       expect(result).toContain("invalid git ref");
       expect(execFile).not.toHaveBeenCalled();
     });
 
     it("rejects git option injection in target", async () => {
-      const gitDiff = getTool("git_diff");
+      const ctx = makeContext(tempDir);
+      const tools = createDevTools(ctx);
+      const gitDiff = getTool(tools, "git_diff");
       const result = await gitDiff.execute({ target: "--output=/tmp/evil" });
       expect(result).toContain("invalid git ref");
       expect(execFile).not.toHaveBeenCalled();
@@ -68,7 +80,9 @@ describe("devTools command injection guards", () => {
 
     it("accepts valid refs and calls execFile with arg array", async () => {
       mockExecFileResult({ stdout: "diff output" });
-      const gitDiff = getTool("git_diff");
+      const ctx = makeContext(tempDir);
+      const tools = createDevTools(ctx);
+      const gitDiff = getTool(tools, "git_diff");
 
       await gitDiff.execute({ target: "main" });
       expect(execFile).toHaveBeenCalledWith(
@@ -91,7 +105,9 @@ describe("devTools command injection guards", () => {
 
     it("defaults target to HEAD when not provided", async () => {
       mockExecFileResult({ stdout: "diff output" });
-      await getTool("git_diff").execute({});
+      const ctx = makeContext(tempDir);
+      const tools = createDevTools(ctx);
+      await getTool(tools, "git_diff").execute({});
       expect(execFile).toHaveBeenCalledWith(
         "git",
         ["diff", "HEAD"],
@@ -104,14 +120,18 @@ describe("devTools command injection guards", () => {
   describe("format path validation", () => {
     it("rejects path outside project", async () => {
       writeFileSync(join(tempDir, ".prettierrc"), "{}");
-      const result = await getTool("format").execute({ path: "../../etc" });
+      const ctx = makeContext(tempDir);
+      const tools = createDevTools(ctx);
+      const result = await getTool(tools, "format").execute({ path: "../../etc" });
       expect(result).toContain("outside project");
       expect(execFile).not.toHaveBeenCalled();
     });
 
     it.runIf(isWindows)("rejects path with cmd metacharacters on Windows", async () => {
       writeFileSync(join(tempDir, ".prettierrc"), "{}");
-      const result = await getTool("format").execute({ path: "foo&bar" });
+      const ctx = makeContext(tempDir);
+      const tools = createDevTools(ctx);
+      const result = await getTool(tools, "format").execute({ path: "foo&bar" });
       expect(result).toContain("metacharacters");
       expect(execFile).not.toHaveBeenCalled();
     });
@@ -122,7 +142,9 @@ describe("devTools command injection guards", () => {
       writeFileSync(join(tempDir, "中文 目录", "file.ts"), "export const x = 1;\n");
 
       mockExecFileResult({ stdout: "formatted" });
-      const result = await getTool("format").execute({ path: "中文 目录" });
+      const ctx = makeContext(tempDir);
+      const tools = createDevTools(ctx);
+      const result = await getTool(tools, "format").execute({ path: "中文 目录" });
       expect(result).not.toContain("Error:");
       expect(execFile).toHaveBeenCalledWith(
         "npx",
@@ -136,7 +158,9 @@ describe("devTools command injection guards", () => {
   describe("lint path validation", () => {
     it("rejects path outside project", async () => {
       writeFileSync(join(tempDir, ".eslintrc.json"), "{}");
-      const result = await getTool("lint").execute({ path: "../../etc" });
+      const ctx = makeContext(tempDir);
+      const tools = createDevTools(ctx);
+      const result = await getTool(tools, "lint").execute({ path: "../../etc" });
       expect(result).toContain("outside project");
       expect(execFile).not.toHaveBeenCalled();
     });
@@ -146,7 +170,9 @@ describe("devTools command injection guards", () => {
       mkdirSync(join(tempDir, "中文 目录"), { recursive: true });
 
       mockExecFileResult({ stdout: "linted" });
-      const result = await getTool("lint").execute({ path: "中文 目录" });
+      const ctx = makeContext(tempDir);
+      const tools = createDevTools(ctx);
+      const result = await getTool(tools, "lint").execute({ path: "中文 目录" });
       expect(result).not.toContain("Error:");
       expect(execFile).toHaveBeenCalledWith(
         "npx",

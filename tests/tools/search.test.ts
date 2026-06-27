@@ -2,25 +2,37 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { writeFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { searchTools, setSearchProjectDir } from "../../src/tools/search.js";
+import { createSearchTools } from "../../src/tools/search.js";
+import type { ToolContext } from "../../src/tools/index.js";
 import type { Tool } from "../../src/tools/index.js";
+import { SafetyChecker } from "../../src/safety.js";
 
-function getTool(name: string): Tool {
-  const tool = searchTools.find((t) => t.name === name);
+function makeContext(dir: string): ToolContext {
+  return {
+    projectDir: dir,
+    safetyChecker: new SafetyChecker({ projectRoot: dir }),
+  };
+}
+
+function getTool(tools: Tool[], name: string): Tool {
+  const tool = tools.find((t) => t.name === name);
   if (!tool) throw new Error(`Tool not found: ${name}`);
   return tool;
 }
 
-describe("searchTools export", () => {
+describe("createSearchTools export", () => {
   it("exports glob and grep tools", () => {
-    const names = searchTools.map((t) => t.name);
+    const ctx = makeContext(process.cwd());
+    const tools = createSearchTools(ctx);
+    const names = tools.map((t) => t.name);
     expect(names).toContain("glob_files");
     expect(names).toContain("grep_content");
-    expect(searchTools).toHaveLength(2);
+    expect(tools).toHaveLength(2);
   });
 
   it("neither tool requires confirmation", () => {
-    for (const tool of searchTools) {
+    const ctx = makeContext(process.cwd());
+    for (const tool of createSearchTools(ctx)) {
       expect(tool.requiresConfirmation).toBeFalsy();
     }
   });
@@ -32,8 +44,8 @@ describe("glob_files", () => {
 
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), "spark-search-test-"));
-    setSearchProjectDir(tempDir);
-    globFiles = getTool("glob_files");
+    const ctx = makeContext(tempDir);
+    globFiles = getTool(createSearchTools(ctx), "glob_files");
   });
 
   afterEach(() => {
@@ -84,8 +96,8 @@ describe("grep_content", () => {
 
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), "spark-search-test-"));
-    setSearchProjectDir(tempDir);
-    grepContent = getTool("grep_content");
+    const ctx = makeContext(tempDir);
+    grepContent = getTool(createSearchTools(ctx), "grep_content");
   });
 
   afterEach(() => {
@@ -169,7 +181,6 @@ describe("grep_content", () => {
   });
 
   it("respects max_results limit", async () => {
-    // Create a file with many lines that all match
     const lines = Array.from({ length: 50 }, (_, i) => `line ${i}`);
     writeFileSync(join(tempDir, "many.txt"), lines.join("\n"));
 
@@ -177,11 +188,9 @@ describe("grep_content", () => {
       pattern: "^line",
       max_results: 10,
     });
-    // The result lines include the summary line at the end
     const resultLines = result.split("\n");
-    // Filter out the summary line
     const matchLines = resultLines.filter((l) => !l.startsWith("Found "));
-    expect(matchLines.length).toBeLessThanOrEqual(11); // 10 matches + possibly context
+    expect(matchLines.length).toBeLessThanOrEqual(11);
   });
 
   it("includes context_before lines", async () => {
@@ -194,9 +203,9 @@ describe("grep_content", () => {
       pattern: "MATCH",
       context_before: 2,
     });
-    expect(result).toContain("context.txt:1:"); // before1
-    expect(result).toContain("context.txt:2:"); // before2
-    expect(result).toContain("context.txt:3:"); // MATCH itself
+    expect(result).toContain("context.txt:1:");
+    expect(result).toContain("context.txt:2:");
+    expect(result).toContain("context.txt:3:");
   });
 
   it("includes context_after lines", async () => {
@@ -209,9 +218,9 @@ describe("grep_content", () => {
       pattern: "MATCH",
       context_after: 2,
     });
-    expect(result).toContain("context.txt:3:"); // MATCH
-    expect(result).toContain("context.txt:4:"); // after1
-    expect(result).toContain("context.txt:5:"); // after2
+    expect(result).toContain("context.txt:3:");
+    expect(result).toContain("context.txt:4:");
+    expect(result).toContain("context.txt:5:");
   });
 
   it("includes context_around (both sides) lines", async () => {
@@ -224,8 +233,8 @@ describe("grep_content", () => {
       pattern: "MATCH",
       context_around: 1,
     });
-    expect(result).toContain("context.txt:1:"); // before
-    expect(result).toContain("context.txt:2:"); // MATCH
-    expect(result).toContain("context.txt:3:"); // after
+    expect(result).toContain("context.txt:1:");
+    expect(result).toContain("context.txt:2:");
+    expect(result).toContain("context.txt:3:");
   });
 });

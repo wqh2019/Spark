@@ -1,14 +1,22 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import { createToolRegistry } from '../src/tools/index.js';
+import type { ToolContext } from '../src/tools/index.js';
 import { ConversationMemory } from '../src/memory.js';
 import { SafetyChecker, requiresConfirmation } from '../src/safety.js';
 import { LLMClient } from '../src/llm.js';
 import { Agent } from '../src/agent.js';
 
+function makeContext(): ToolContext {
+  return {
+    projectDir: process.cwd(),
+    safetyChecker: new SafetyChecker({ projectRoot: process.cwd() }),
+  };
+}
+
 describe('integration', () => {
-  it('tool registry contains all 16 expected tools', async () => {
-    const registry = await createToolRegistry();
+  it('tool registry contains all 16 expected tools', () => {
+    const registry = createToolRegistry(makeContext());
     const names = registry.list().map(t => t.name).sort();
     expect(names).toEqual([
       'edit_file',

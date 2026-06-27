@@ -2,18 +2,30 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { devTools, setDevProjectDir, detectFormatterConfigs } from "../../src/tools/dev.js";
+import { createDevTools, detectFormatterConfigs } from "../../src/tools/dev.js";
+import type { ToolContext } from "../../src/tools/index.js";
 import type { Tool } from "../../src/tools/index.js";
+import { SafetyChecker } from "../../src/safety.js";
 
-function getTool(name: string): Tool {
-  const tool = devTools.find((t) => t.name === name);
+function makeContext(dir: string): ToolContext {
+  return {
+    projectDir: dir,
+    safetyChecker: new SafetyChecker({ projectRoot: dir }),
+  };
+}
+
+function getTool(tools: Tool[], name: string): Tool {
+  const tool = tools.find((t) => t.name === name);
   if (!tool) throw new Error(`Tool not found: ${name}`);
   return tool;
 }
 
-describe("devTools export", () => {
+describe("createDevTools export", () => {
+  const ctx = makeContext(process.cwd());
+
   it("exports all 9 dev tools", () => {
-    const names = devTools.map((t) => t.name);
+    const tools = createDevTools(ctx);
+    const names = tools.map((t) => t.name);
     expect(names).toContain("git_status");
     expect(names).toContain("git_diff");
     expect(names).toContain("git_add");
@@ -23,29 +35,32 @@ describe("devTools export", () => {
     expect(names).toContain("format");
     expect(names).toContain("lint");
     expect(names).toContain("test");
-    expect(devTools).toHaveLength(9);
+    expect(tools).toHaveLength(9);
   });
 
   it("format, lint, git_add, git_commit, git_checkout require confirmation", () => {
-    expect(getTool("format").requiresConfirmation).toBe(true);
-    expect(getTool("lint").requiresConfirmation).toBe(true);
-    expect(getTool("git_add").requiresConfirmation).toBe(true);
-    expect(getTool("git_commit").requiresConfirmation).toBe(true);
-    expect(getTool("git_checkout").requiresConfirmation).toBe(true);
+    const tools = createDevTools(ctx);
+    expect(getTool(tools, "format").requiresConfirmation).toBe(true);
+    expect(getTool(tools, "lint").requiresConfirmation).toBe(true);
+    expect(getTool(tools, "git_add").requiresConfirmation).toBe(true);
+    expect(getTool(tools, "git_commit").requiresConfirmation).toBe(true);
+    expect(getTool(tools, "git_checkout").requiresConfirmation).toBe(true);
   });
 
   it("git_status, git_diff, git_log, and test do not require confirmation", () => {
-    expect(getTool("git_status").requiresConfirmation).toBeFalsy();
-    expect(getTool("git_diff").requiresConfirmation).toBeFalsy();
-    expect(getTool("git_log").requiresConfirmation).toBeFalsy();
-    expect(getTool("test").requiresConfirmation).toBeFalsy();
+    const tools = createDevTools(ctx);
+    expect(getTool(tools, "git_status").requiresConfirmation).toBeFalsy();
+    expect(getTool(tools, "git_diff").requiresConfirmation).toBeFalsy();
+    expect(getTool(tools, "git_log").requiresConfirmation).toBeFalsy();
+    expect(getTool(tools, "test").requiresConfirmation).toBeFalsy();
   });
 });
 
 describe("git_status", () => {
   it("returns string output", async () => {
-    setDevProjectDir(process.cwd());
-    const gitStatus = getTool("git_status");
+    const ctx = makeContext(process.cwd());
+    const tools = createDevTools(ctx);
+    const gitStatus = getTool(tools, "git_status");
     const result = await gitStatus.execute({});
     expect(typeof result).toBe("string");
     expect(result.length).toBeGreaterThan(0);
@@ -54,8 +69,9 @@ describe("git_status", () => {
 
 describe("git_diff", () => {
   it("returns string output", async () => {
-    setDevProjectDir(process.cwd());
-    const gitDiff = getTool("git_diff");
+    const ctx = makeContext(process.cwd());
+    const tools = createDevTools(ctx);
+    const gitDiff = getTool(tools, "git_diff");
     const result = await gitDiff.execute({});
     expect(typeof result).toBe("string");
     expect(result.length).toBeGreaterThan(0);
@@ -64,19 +80,20 @@ describe("git_diff", () => {
 
 describe("git_log (C4 new tool)", () => {
   it("returns string output", async () => {
-    setDevProjectDir(process.cwd());
-    const gitLog = getTool("git_log");
+    const ctx = makeContext(process.cwd());
+    const tools = createDevTools(ctx);
+    const gitLog = getTool(tools, "git_log");
     const result = await gitLog.execute({});
     expect(typeof result).toBe("string");
     expect(result.length).toBeGreaterThan(0);
   });
 
   it("respects max_count parameter", async () => {
-    setDevProjectDir(process.cwd());
-    const gitLog = getTool("git_log");
+    const ctx = makeContext(process.cwd());
+    const tools = createDevTools(ctx);
+    const gitLog = getTool(tools, "git_log");
     const result = await gitLog.execute({ max_count: 3 });
     const lines = result.trim().split("\n");
-    // Should have at most 3 lines (oneline format = 1 line per commit)
     expect(lines.length).toBeLessThanOrEqual(3);
   });
 });
@@ -84,31 +101,30 @@ describe("git_log (C4 new tool)", () => {
 describe("git_add (C4 new tool)", () => {
   it("validates path arguments", async () => {
     const tempDir = mkdtempSync(join(tmpdir(), "spark-dev-test-"));
-    setDevProjectDir(tempDir);
+    const ctx = makeContext(tempDir);
+    const tools = createDevTools(ctx);
     try {
-      const gitAdd = getTool("git_add");
-      // Path outside project should be rejected
+      const gitAdd = getTool(tools, "git_add");
       const result = await gitAdd.execute({ path: "../../etc" });
       expect(result).toContain("outside project");
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
-      setDevProjectDir(process.cwd());
     }
   });
 });
 
 describe("git_commit (C4 new tool)", () => {
   it("rejects missing message", async () => {
-    // git_commit is defined with required: ["message"]
-    const gitCommit = getTool("git_commit");
+    const ctx = makeContext(process.cwd());
+    const gitCommit = getTool(createDevTools(ctx), "git_commit");
     expect(gitCommit.required).toContain("message");
   });
 });
 
 describe("git_checkout (C4 new tool)", () => {
   it("validates target argument", async () => {
-    const gitCheckout = getTool("git_checkout");
-    // Injection attempt should be rejected
+    const ctx = makeContext(process.cwd());
+    const gitCheckout = getTool(createDevTools(ctx), "git_checkout");
     const result = await gitCheckout.execute({
       target: "HEAD; rm -rf /",
     });
@@ -116,7 +132,8 @@ describe("git_checkout (C4 new tool)", () => {
   });
 
   it("rejects missing target", () => {
-    const gitCheckout = getTool("git_checkout");
+    const ctx = makeContext(process.cwd());
+    const gitCheckout = getTool(createDevTools(ctx), "git_checkout");
     expect(gitCheckout.required).toContain("target");
   });
 });
@@ -166,14 +183,14 @@ describe("detectFormatterConfigs", () => {
 describe("format tool skips when no config", () => {
   it("returns skip message when no config found", async () => {
     const tempDir = mkdtempSync(join(tmpdir(), "spark-test-"));
-    setDevProjectDir(tempDir);
+    const ctx = makeContext(tempDir);
+    const tools = createDevTools(ctx);
     try {
-      const format = getTool("format");
+      const format = getTool(tools, "format");
       const result = await format.execute({});
       expect(result).toContain("No prettier or eslint configuration found");
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
-      setDevProjectDir(process.cwd());
     }
   });
 });
@@ -181,14 +198,14 @@ describe("format tool skips when no config", () => {
 describe("lint tool skips when no eslint config", () => {
   it("returns skip message when no eslint config found", async () => {
     const tempDir = mkdtempSync(join(tmpdir(), "spark-test-"));
-    setDevProjectDir(tempDir);
+    const ctx = makeContext(tempDir);
+    const tools = createDevTools(ctx);
     try {
-      const lint = getTool("lint");
+      const lint = getTool(tools, "lint");
       const result = await lint.execute({});
       expect(result).toContain("No eslint configuration found");
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
-      setDevProjectDir(process.cwd());
     }
   });
 });

@@ -3,7 +3,9 @@ import type { ChatCompletionMessageParam } from "openai/resources/chat/completio
 import type { SparkConfig } from "./config.js";
 import { LLMClient } from "./llm.js";
 import { ConversationMemory, type Message, type ToolCall } from "./memory.js";
+import { SafetyChecker } from "./safety.js";
 import { ToolRegistry, createToolRegistry } from "./tools/index.js";
+import type { ToolContext, ToolPlugin } from "./tools/index.js";
 import { requiresConfirmation } from "./safety.js";
 import { buildSystemPrompt } from "./prompt.js";
 import {
@@ -15,15 +17,13 @@ import {
   renderInfo,
   confirmAction,
 } from "./render.js";
-import { setProjectDir } from "./tools/file.js";
-import { setShellProjectDir } from "./tools/shell.js";
-import { setSearchProjectDir } from "./tools/search.js";
-import { setDevProjectDir } from "./tools/dev.js";
 
 export interface AgentOptions {
   maxSteps?: number;
   autoApprove?: string[];
   systemPrompt?: string;
+  /** Optional plugins for dynamic tool registration (D3). */
+  plugins?: ToolPlugin[];
 }
 
 export class Agent {
@@ -47,34 +47,14 @@ export class Agent {
     this.maxSteps = options?.maxSteps ?? config.maxSteps;
     this.autoApprove = new Set(options?.autoApprove ?? config.autoApprove);
     this.systemPrompt = options?.systemPrompt ?? buildSystemPrompt(this.cwd);
-    this.registry = new ToolRegistry();
 
-    // Initialize tool registry asynchronously at first use
-    this.initRegistry();
-    this.setProjectDirs();
-  }
-
-  private initialized = false;
-  private initPromise: Promise<void> | null = null;
-
-  private initRegistry(): void {
-    this.initPromise = createToolRegistry().then((reg) => {
-      this.registry = reg;
-      this.initialized = true;
-    });
-  }
-
-  private async ensureInit(): Promise<void> {
-    if (!this.initialized) {
-      await this.initPromise;
-    }
-  }
-
-  private setProjectDirs(): void {
-    setProjectDir(this.cwd);
-    setShellProjectDir(this.cwd);
-    setSearchProjectDir(this.cwd);
-    setDevProjectDir(this.cwd);
+    // Create ToolContext and synchronously initialize the registry (D1/D2).
+    // Using dependency injection instead of module-level global state.
+    const ctx: ToolContext = {
+      projectDir: this.cwd,
+      safetyChecker: new SafetyChecker({ projectRoot: this.cwd }),
+    };
+    this.registry = createToolRegistry(ctx, options?.plugins);
   }
 
   get sessionId(): string {
@@ -82,8 +62,6 @@ export class Agent {
   }
 
   async run(userMessage: string, signal?: AbortSignal): Promise<string> {
-    await this.ensureInit();
-
     if (this.memory.getMessages().length === 0) {
       this.memory.addMessage("system", this.systemPrompt);
     }

@@ -2,23 +2,35 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { shellTools, setShellProjectDir } from "../../src/tools/shell.js";
+import { createShellTools } from "../../src/tools/shell.js";
+import type { ToolContext } from "../../src/tools/index.js";
 import type { Tool } from "../../src/tools/index.js";
+import { SafetyChecker } from "../../src/safety.js";
 
-function getTool(name: string): Tool {
-  const tool = shellTools.find((t) => t.name === name);
+function makeContext(dir: string): ToolContext {
+  return {
+    projectDir: dir,
+    safetyChecker: new SafetyChecker({ projectRoot: dir }),
+  };
+}
+
+function getTool(tools: Tool[], name: string): Tool {
+  const tool = tools.find((t) => t.name === name);
   if (!tool) throw new Error(`Tool not found: ${name}`);
   return tool;
 }
 
-describe("shellTools export", () => {
+describe("createShellTools export", () => {
   it("exports run_command tool", () => {
-    expect(shellTools).toHaveLength(1);
-    expect(shellTools[0].name).toBe("run_command");
+    const ctx = makeContext(process.cwd());
+    const tools = createShellTools(ctx);
+    expect(tools).toHaveLength(1);
+    expect(tools[0].name).toBe("run_command");
   });
 
   it("run_command requires confirmation", () => {
-    const runCommand = getTool("run_command");
+    const ctx = makeContext(process.cwd());
+    const runCommand = getTool(createShellTools(ctx), "run_command");
     expect(runCommand.requiresConfirmation).toBe(true);
   });
 });
@@ -29,8 +41,8 @@ describe("run_command", () => {
 
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), "spark-shell-test-"));
-    setShellProjectDir(tempDir);
-    runCommand = getTool("run_command");
+    const ctx = makeContext(tempDir);
+    runCommand = getTool(createShellTools(ctx), "run_command");
   });
 
   afterEach(() => {
@@ -66,7 +78,8 @@ describe("run_command", () => {
   });
 
   it("uses default timeout of 120000ms", async () => {
-    const runCmd = getTool("run_command");
+    const ctx = makeContext(process.cwd());
+    const runCmd = getTool(createShellTools(ctx), "run_command");
     const timeoutParam = runCmd.parameters.timeout as Record<string, unknown>;
     expect(timeoutParam).toBeDefined();
     expect(String(timeoutParam.description)).toContain("120000");
