@@ -7,13 +7,17 @@ import { LLMClient } from '../src/llm.js';
 import { Agent } from '../src/agent.js';
 
 describe('integration', () => {
-  it('tool registry contains all 12 expected tools', async () => {
+  it('tool registry contains all 16 expected tools', async () => {
     const registry = await createToolRegistry();
     const names = registry.list().map(t => t.name).sort();
     expect(names).toEqual([
       'edit_file',
       'format',
+      'git_add',
+      'git_checkout',
+      'git_commit',
       'git_diff',
+      'git_log',
       'git_status',
       'glob_files',
       'grep_content',
@@ -22,9 +26,10 @@ describe('integration', () => {
       'read_file',
       'run_command',
       'test',
+      'web_fetch',
       'write_file',
     ]);
-    expect(names).toHaveLength(12);
+    expect(names).toHaveLength(17);
   });
 
   it('confirmation flags match design spec', () => {
@@ -33,11 +38,16 @@ describe('integration', () => {
     expect(requiresConfirmation('edit_file')).toBe(true);
     expect(requiresConfirmation('run_command')).toBe(true);
     expect(requiresConfirmation('format')).toBe(true);
+    expect(requiresConfirmation('git_add')).toBe(true);
+    expect(requiresConfirmation('git_commit')).toBe(true);
+    expect(requiresConfirmation('git_checkout')).toBe(true);
     expect(requiresConfirmation('glob_files')).toBe(false);
     expect(requiresConfirmation('grep_content')).toBe(false);
     expect(requiresConfirmation('list_dir')).toBe(false);
     expect(requiresConfirmation('git_status')).toBe(false);
     expect(requiresConfirmation('git_diff')).toBe(false);
+    expect(requiresConfirmation('git_log')).toBe(false);
+    expect(requiresConfirmation('web_fetch')).toBe(false);
   });
 
   it('config loads from env vars', () => {

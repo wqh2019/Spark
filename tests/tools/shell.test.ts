@@ -43,7 +43,6 @@ describe("run_command", () => {
   });
 
   it("returns non-zero exit code info", async () => {
-    // Use a command that exits with non-zero code
     const isWindows = process.platform === "win32";
     const command = isWindows ? "exit /b 1" : "exit 1";
     const result = await runCommand.execute({ command });
@@ -51,9 +50,7 @@ describe("run_command", () => {
   });
 
   it("handles timeout", async () => {
-    // Use a command that sleeps longer than the timeout
     const isWindows = process.platform === "win32";
-    // On Windows, `ping -n` can be used as a delay; on Unix, `sleep`
     const command = isWindows
       ? "ping -n 10 127.0.0.1 >nul"
       : "sleep 10";
@@ -69,7 +66,6 @@ describe("run_command", () => {
   });
 
   it("uses default timeout of 120000ms", async () => {
-    // We verify the tool definition specifies the correct default in description
     const runCmd = getTool("run_command");
     const timeoutParam = runCmd.parameters.timeout as Record<string, unknown>;
     expect(timeoutParam).toBeDefined();

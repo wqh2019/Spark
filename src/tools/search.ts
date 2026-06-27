@@ -1,6 +1,6 @@
 import { glob as globFn } from "glob";
-import { readFileSync, readdirSync, statSync } from "node:fs";
-import { resolve, join } from "node:path";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import type { Tool } from "./index.js";
 import { SafetyChecker } from "../safety.js";
 
@@ -12,7 +12,14 @@ export function setSearchProjectDir(dir: string): void {
   safetyChecker = new SafetyChecker({ projectRoot: dir });
 }
 
-const SKIP_DIRS = new Set([".git", "node_modules", "__pycache__", ".venv"]);
+const DEFAULT_SKIP_DIRS = [
+  "**/node_modules/**",
+  "**/.git/**",
+  "**/__pycache__/**",
+  "**/.venv/**",
+  "**/dist/**",
+  "**/.next/**",
+];
 
 const globFiles: Tool = {
   name: "glob_files",
@@ -40,7 +47,11 @@ const globFiles: Tool = {
     }
 
     try {
-      const matches = await globFn(pattern, { cwd: basePath, nodir: true });
+      const matches = await globFn(pattern, {
+        cwd: basePath,
+        nodir: true,
+        ignore: DEFAULT_SKIP_DIRS,
+      });
       if (matches.length === 0) {
         return `No files matching "${pattern}" found in ${basePath}`;
       }
@@ -51,30 +62,10 @@ const globFiles: Tool = {
   },
 };
 
-/** Recursively walk a directory, collecting all file paths (relative to root), skipping SKIP_DIRS. */
-function walkDir(root: string, prefix = ""): string[] {
-  const results: string[] = [];
-  let entries;
-  try {
-    entries = readdirSync(join(root, prefix), { withFileTypes: true });
-  } catch {
-    return results;
-  }
-
-  for (const entry of entries) {
-    if (entry.isDirectory()) {
-      if (SKIP_DIRS.has(entry.name)) continue;
-      results.push(...walkDir(root, prefix ? `${prefix}/${entry.name}` : entry.name));
-    } else if (entry.isFile()) {
-      results.push(prefix ? `${prefix}/${entry.name}` : entry.name);
-    }
-  }
-  return results;
-}
-
 const grepContent: Tool = {
   name: "grep_content",
-  description: "Search file contents using a regular expression pattern.",
+  description:
+    "Search file contents using a regular expression pattern. Supports file type filtering, context lines, and result limits.",
   parameters: {
     pattern: {
       type: "string",
@@ -84,12 +75,49 @@ const grepContent: Tool = {
       type: "string",
       description: "Directory to search in (default: .)",
     },
+    file_pattern: {
+      type: "string",
+      description: "Optional glob pattern to filter files (e.g. **/*.ts, src/**/*.py)",
+    },
+    max_results: {
+      type: "number",
+      description: "Maximum number of matching lines to return (default: 200)",
+    },
+    context_before: {
+      type: "number",
+      description: "Number of context lines before each match (default: 0)",
+    },
+    context_after: {
+      type: "number",
+      description: "Number of context lines after each match (default: 0)",
+    },
+    context_around: {
+      type: "number",
+      description:
+        "Number of context lines before and after each match (overrides context_before/context_after)",
+    },
   },
   required: ["pattern"],
   requiresConfirmation: false,
   async execute(args) {
-    const pattern = String(args.pattern);
+    const patternText = String(args.pattern);
     const searchPath = resolve(projectDir, String(args.path ?? "."));
+    const filePattern = args.file_pattern ? String(args.file_pattern) : "**/*";
+    const maxResults = typeof args.max_results === "number" ? args.max_results : 200;
+    const contextAround =
+      typeof args.context_around === "number" ? args.context_around : 0;
+    const contextBefore =
+      contextAround > 0
+        ? contextAround
+        : typeof args.context_before === "number"
+          ? args.context_before
+          : 0;
+    const contextAfter =
+      contextAround > 0
+        ? contextAround
+        : typeof args.context_after === "number"
+          ? args.context_after
+          : 0;
 
     try {
       safetyChecker.checkPath(searchPath);
@@ -99,47 +127,100 @@ const grepContent: Tool = {
 
     let regex: RegExp;
     try {
-      regex = new RegExp(pattern, "i");
+      regex = new RegExp(patternText, "i");
     } catch {
-      return `Invalid regex pattern: ${pattern}`;
+      return `Invalid regex pattern: ${patternText}`;
     }
 
-    const files = walkDir(searchPath);
+    // Find matching files using glob (async, respects .gitignore)
+    let files: string[];
+    try {
+      files = await globFn(filePattern, {
+        cwd: searchPath,
+        nodir: true,
+        ignore: DEFAULT_SKIP_DIRS,
+        dot: false,
+      });
+    } catch (err) {
+      return `Glob error: ${err instanceof Error ? err.message : String(err)}`;
+    }
+
+    if (files.length === 0) {
+      return `No files matching "${filePattern}" found in ${searchPath}`;
+    }
+
     const results: string[] = [];
     let matchCount = 0;
     let fileCount = 0;
 
     for (const file of files) {
+      if (matchCount >= maxResults) break;
+
       const fullPath = resolve(searchPath, file);
-      const fileMatches: string[] = [];
+
+      let content: string;
       try {
-        const content = readFileSync(fullPath, "utf-8");
-        const lines = content.split("\n");
-        for (let i = 0; i < lines.length; i++) {
-          if (regex.test(lines[i])) {
-            // Reset lastIndex since we're reusing the regex
-            regex.lastIndex = 0;
-            fileMatches.push(`${file}:${i + 1}: ${lines[i].trim()}`);
-            matchCount++;
-          } else {
-            regex.lastIndex = 0;
+        content = await readFile(fullPath, "utf-8");
+      } catch {
+        continue; // Skip unreadable files
+      }
+
+      const lines = content.split("\n");
+      const fileMatchLines: number[] = [];
+
+      for (let i = 0; i < lines.length; i++) {
+        if (matchCount >= maxResults) break;
+
+        regex.lastIndex = 0;
+        if (regex.test(lines[i])) {
+          fileMatchLines.push(i);
+          matchCount++;
+        }
+      }
+
+      if (fileMatchLines.length > 0) {
+        fileCount++;
+
+        // Build output with context lines
+        const seenLines = new Set<number>();
+        for (const mLine of fileMatchLines) {
+          // Context before
+          const ctxStart = Math.max(0, mLine - contextBefore);
+          for (let ci = ctxStart; ci < mLine; ci++) {
+            if (!seenLines.has(ci)) {
+              seenLines.add(ci);
+              results.push(`${file}:${ci + 1}: ${lines[ci].trim()}`);
+            }
+          }
+
+          // Match line
+          if (!seenLines.has(mLine)) {
+            seenLines.add(mLine);
+            results.push(`${file}:${mLine + 1}: ${lines[mLine].trim()}`);
+          }
+
+          // Context after
+          const ctxEnd = Math.min(lines.length - 1, mLine + contextAfter);
+          for (let ci = mLine + 1; ci <= ctxEnd; ci++) {
+            if (!seenLines.has(ci)) {
+              seenLines.add(ci);
+              results.push(`${file}:${ci + 1}: ${lines[ci].trim()}`);
+            }
           }
         }
-      } catch {
-        // Skip unreadable files
-      }
-      if (fileMatches.length > 0) {
-        results.push(...fileMatches);
-        fileCount++;
       }
     }
 
     if (results.length === 0) {
-      return `No matches for "${pattern}" in ${files.length} files`;
+      return `No matches for "${patternText}" in ${files.length} files`;
     }
 
-    results.push(`Found ${matchCount} matches in ${fileCount} files`);
-    return results.join("\n");
+    // Truncate results to maxResults if over (in case context lines caused overflow)
+    const truncated = results.slice(0, maxResults);
+    truncated.push(
+      `Found ${matchCount} matches in ${fileCount} files (scanned ${files.length} files)`,
+    );
+    return truncated.join("\n");
   },
 };
 

@@ -93,7 +93,10 @@ describe("grep_content", () => {
   });
 
   it("finds matching lines", async () => {
-    writeFileSync(join(tempDir, "code.ts"), "function hello() {\n  return 42;\n}\n");
+    writeFileSync(
+      join(tempDir, "code.ts"),
+      "function hello() {\n  return 42;\n}\n",
+    );
 
     const result = await grepContent.execute({ pattern: "hello" });
     expect(result).toContain("code.ts:1:");
@@ -101,7 +104,10 @@ describe("grep_content", () => {
   });
 
   it("returns file:line: content format", async () => {
-    writeFileSync(join(tempDir, "sample.txt"), "first line\nsecond line\nthird line\n");
+    writeFileSync(
+      join(tempDir, "sample.txt"),
+      "first line\nsecond line\nthird line\n",
+    );
 
     const result = await grepContent.execute({ pattern: "second" });
     expect(result).toContain("sample.txt:2:");
@@ -146,5 +152,80 @@ describe("grep_content", () => {
     expect(result).toContain("src.ts");
     expect(result).not.toContain(".git");
     expect(result).not.toContain("node_modules");
+  });
+
+  // --- C1 new features ---
+
+  it("filters by file_pattern", async () => {
+    writeFileSync(join(tempDir, "data.txt"), "match this\n");
+    writeFileSync(join(tempDir, "source.ts"), "match this\n");
+
+    const result = await grepContent.execute({
+      pattern: "match",
+      file_pattern: "*.ts",
+    });
+    expect(result).toContain("source.ts");
+    expect(result).not.toContain("data.txt");
+  });
+
+  it("respects max_results limit", async () => {
+    // Create a file with many lines that all match
+    const lines = Array.from({ length: 50 }, (_, i) => `line ${i}`);
+    writeFileSync(join(tempDir, "many.txt"), lines.join("\n"));
+
+    const result = await grepContent.execute({
+      pattern: "^line",
+      max_results: 10,
+    });
+    // The result lines include the summary line at the end
+    const resultLines = result.split("\n");
+    // Filter out the summary line
+    const matchLines = resultLines.filter((l) => !l.startsWith("Found "));
+    expect(matchLines.length).toBeLessThanOrEqual(11); // 10 matches + possibly context
+  });
+
+  it("includes context_before lines", async () => {
+    writeFileSync(
+      join(tempDir, "context.txt"),
+      "before1\nbefore2\nMATCH\nafter1\nafter2\n",
+    );
+
+    const result = await grepContent.execute({
+      pattern: "MATCH",
+      context_before: 2,
+    });
+    expect(result).toContain("context.txt:1:"); // before1
+    expect(result).toContain("context.txt:2:"); // before2
+    expect(result).toContain("context.txt:3:"); // MATCH itself
+  });
+
+  it("includes context_after lines", async () => {
+    writeFileSync(
+      join(tempDir, "context.txt"),
+      "before1\nbefore2\nMATCH\nafter1\nafter2\n",
+    );
+
+    const result = await grepContent.execute({
+      pattern: "MATCH",
+      context_after: 2,
+    });
+    expect(result).toContain("context.txt:3:"); // MATCH
+    expect(result).toContain("context.txt:4:"); // after1
+    expect(result).toContain("context.txt:5:"); // after2
+  });
+
+  it("includes context_around (both sides) lines", async () => {
+    writeFileSync(
+      join(tempDir, "context.txt"),
+      "before\nMATCH\nafter\n",
+    );
+
+    const result = await grepContent.execute({
+      pattern: "MATCH",
+      context_around: 1,
+    });
+    expect(result).toContain("context.txt:1:"); // before
+    expect(result).toContain("context.txt:2:"); // MATCH
+    expect(result).toContain("context.txt:3:"); // after
   });
 });

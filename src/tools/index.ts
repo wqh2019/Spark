@@ -63,23 +63,25 @@ export class ToolRegistry {
  * Uses dynamic imports to avoid circular dependency issues
  * (tool modules previously imported from this index module).
  *
- * Returns a registry with 10 tools:
+ * Returns a registry with 16 tools:
  *   - fileTools: read_file, write_file, edit_file, list_dir
  *   - shellTools: run_command
  *   - searchTools: glob_files, grep_content
- *   - devTools: git_status, git_diff, format
+ *   - devTools: git_status, git_diff, git_add, git_commit, git_log, git_checkout, format, lint, test
+ *   - webTools: web_fetch
  */
 export async function createToolRegistry(): Promise<ToolRegistry> {
-  const [{ fileTools }, { shellTools }, { searchTools }, { devTools }] =
+  const [{ fileTools }, { shellTools }, { searchTools }, { devTools }, { webTools }] =
     await Promise.all([
       import("./file.js"),
       import("./shell.js"),
       import("./search.js"),
       import("./dev.js"),
+      import("./web.js"),
     ]);
 
   const registry = new ToolRegistry();
-  const allTools = [...fileTools, ...shellTools, ...searchTools, ...devTools];
+  const allTools = [...fileTools, ...shellTools, ...searchTools, ...devTools, ...webTools];
   for (const tool of allTools) {
     registry.register(tool);
   }

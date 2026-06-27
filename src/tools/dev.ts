@@ -21,6 +21,9 @@ const GIT_REF_PATTERN = /^[A-Za-z0-9_][A-Za-z0-9_./-]*$/;
 // with shell:true). Spaces, unicode, parentheses, and # are allowed.
 const WIN_SHELL_META = /[&|<>"^%]/;
 
+// Valid git paths: alphanum, underscore, hyphen, dot, slash, @
+const GIT_PATH_PATTERN = /^[A-Za-z0-9_./@-]+$/;
+
 function runExec(file: string, args: string[], timeout = 30_000): Promise<string> {
   // npm/npx are .cmd scripts on Windows and require shell:true (Node CVE hardening).
   // git is a real binary and runs without a shell on every platform.
@@ -85,6 +88,133 @@ const gitDiff: Tool = {
       return `Error: invalid git ref (rejected): ${target}`;
     }
     return runExec("git", ["diff", target]);
+  },
+};
+
+const gitAdd: Tool = {
+  name: "git_add",
+  description: "Stage file(s) for commit using git add.",
+  parameters: {
+    path: {
+      type: "string",
+      description: "File or directory to stage (default: .)",
+    },
+  },
+  requiresConfirmation: true,
+  async execute(args) {
+    const target = args.path ? String(args.path) : ".";
+    const pathError = validatePathArg(target);
+    if (pathError) return pathError;
+    return runExec("git", ["add", target]);
+  },
+};
+
+const gitCommit: Tool = {
+  name: "git_commit",
+  description: "Create a git commit with a message.",
+  parameters: {
+    message: {
+      type: "string",
+      description: "Commit message",
+    },
+    all: {
+      type: "boolean",
+      description: "Auto-stage all tracked files (git commit -a, default: false)",
+    },
+    allow_empty: {
+      type: "boolean",
+      description: "Allow empty commit (default: false)",
+    },
+  },
+  requiresConfirmation: true,
+  required: ["message"],
+  async execute(args) {
+    const message = String(args.message);
+    const gitArgs = ["commit"];
+
+    if (args.all === true) {
+      gitArgs.push("-a");
+    }
+
+    if (args.allow_empty === true) {
+      gitArgs.push("--allow-empty");
+    }
+
+    gitArgs.push("-m", message);
+    return runExec("git", gitArgs);
+  },
+};
+
+const gitLog: Tool = {
+  name: "git_log",
+  description: "Show commit log. Supports limiting the number of commits and filtering by path.",
+  parameters: {
+    max_count: {
+      type: "number",
+      description: "Maximum number of commits to show (default: 10)",
+    },
+    path: {
+      type: "string",
+      description: "Filter log by file path",
+    },
+    format: {
+      type: "string",
+      description: "Log format: 'oneline' (default), 'short', 'medium', 'full', or 'format:<string>'",
+    },
+  },
+  requiresConfirmation: false,
+  async execute(args) {
+    const maxCount = typeof args.max_count === "number" ? args.max_count : 10;
+    const format = args.format ? String(args.format) : "oneline";
+    const gitArgs = ["log", `--max-count=${maxCount}`];
+
+    if (format.startsWith("format:")) {
+      gitArgs.push(`--pretty=${format}`);
+    } else {
+      gitArgs.push(`--pretty=${format}`);
+    }
+
+    if (args.path) {
+      const pathStr = String(args.path);
+      if (!GIT_PATH_PATTERN.test(pathStr)) {
+        return `Error: invalid path (rejected): ${pathStr}`;
+      }
+      gitArgs.push("--", pathStr);
+    }
+
+    return runExec("git", gitArgs);
+  },
+};
+
+const gitCheckout: Tool = {
+  name: "git_checkout",
+  description: "Switch branches or restore working tree files.",
+  parameters: {
+    target: {
+      type: "string",
+      description: "Branch name, commit SHA, or file path to checkout",
+    },
+    create_branch: {
+      type: "boolean",
+      description: "Create a new branch (git checkout -b, default: false)",
+    },
+  },
+  requiresConfirmation: true,
+  required: ["target"],
+  async execute(args) {
+    const target = String(args.target);
+    const gitArgs = ["checkout"];
+
+    if (args.create_branch === true) {
+      gitArgs.push("-b");
+    }
+
+    if (!GIT_REF_PATTERN.test(target)) {
+      return `Error: invalid target (rejected): ${target}`;
+    }
+
+    gitArgs.push(target);
+    return runExec("git", gitArgs);
   },
 };
 
@@ -180,4 +310,14 @@ const testTool: Tool = {
   },
 };
 
-export const devTools: Tool[] = [gitStatus, gitDiff, format, lint, testTool];
+export const devTools: Tool[] = [
+  gitStatus,
+  gitDiff,
+  gitAdd,
+  gitCommit,
+  gitLog,
+  gitCheckout,
+  format,
+  lint,
+  testTool,
+];

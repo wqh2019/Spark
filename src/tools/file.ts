@@ -125,7 +125,7 @@ const writeFile: Tool = {
 const editFile: Tool = {
   name: "edit_file",
   description:
-    "Replace an exact string in a file. Set replace_all to true to replace all occurrences.",
+    "Replace content in a file. Supports exact string replacement (old_string/new_string) and line number based editing (start_line/end_line).",
   parameters: {
     file_path: {
       type: "string",
@@ -133,24 +133,33 @@ const editFile: Tool = {
     },
     old_string: {
       type: "string",
-      description: "Exact string to find and replace",
+      description:
+        "Exact string to find and replace. Not needed when using line number mode (start_line/end_line).",
     },
     new_string: {
       type: "string",
-      description: "String to replace with",
+      description: "String to replace with (for string mode) or new content (for line mode)",
     },
     replace_all: {
       type: "boolean",
-      description: "Replace all occurrences (default: false)",
+      description: "Replace all occurrences (default: false, string mode only)",
+    },
+    start_line: {
+      type: "number",
+      description:
+        "Start line number (1-based) for line-based editing. Requires end_line. The lines from start_line to end_line (inclusive) will be replaced with new_string.",
+    },
+    end_line: {
+      type: "number",
+      description:
+        "End line number (1-based, inclusive) for line-based editing. Requires start_line.",
     },
   },
   requiresConfirmation: true,
-  required: ["file_path", "old_string", "new_string"],
+  required: ["file_path"],
   async execute(args) {
     const filePath = String(args.file_path);
-    const oldStr = String(args.old_string);
-    const newStr = String(args.new_string);
-    const replaceAll = args.replace_all === true;
+    const newStr = String(args.new_string ?? "");
 
     try {
       safetyChecker.checkPath(resolve(filePath));
@@ -170,23 +179,55 @@ const editFile: Tool = {
         return err instanceof Error ? err.message : String(err);
       }
 
-      const content = readFileSync(filePath, "utf-8");
+      let content = readFileSync(filePath, "utf-8");
 
-      if (!content.includes(oldStr)) {
+      // --- Line number mode ---
+      const startLine = typeof args.start_line === "number" ? args.start_line : 0;
+      const endLine = typeof args.end_line === "number" ? args.end_line : 0;
+      if (startLine > 0 && endLine > 0) {
+        const lines = content.replace(/\r\n/g, "\n").split("\n");
+        if (startLine < 1 || startLine > lines.length) {
+          return `Error editing file: start_line ${startLine} is out of range (file has ${lines.length} lines)`;
+        }
+        if (endLine < startLine || endLine > lines.length) {
+          return `Error editing file: end_line ${endLine} is out of range (file has ${lines.length} lines)`;
+        }
+
+        const newLines = newStr.split("\n");
+        const before = lines.slice(0, startLine - 1);
+        const after = lines.slice(endLine);
+        const updated = [...before, ...newLines, ...after];
+        writeFileSync(filePath, updated.join("\n"), "utf-8");
+        return `Successfully edited ${filePath} (replaced lines ${startLine}-${endLine})`;
+      }
+
+      // --- String replacement mode ---
+      const oldStr = String(args.old_string ?? "");
+      if (!oldStr) {
+        return `Error editing file: old_string is required for string replacement mode`;
+      }
+
+      const replaceAll = args.replace_all === true;
+
+      // Normalize CRLF to LF for matching
+      const normalizedContent = content.replace(/\r\n/g, "\n");
+      const normalizedOldStr = oldStr.replace(/\r\n/g, "\n");
+
+      if (!normalizedContent.includes(normalizedOldStr)) {
         return `Error editing file: String not found in ${filePath}`;
       }
 
       if (!replaceAll) {
-        const firstIdx = content.indexOf(oldStr);
-        const secondIdx = content.indexOf(oldStr, firstIdx + 1);
+        const firstIdx = normalizedContent.indexOf(normalizedOldStr);
+        const secondIdx = normalizedContent.indexOf(normalizedOldStr, firstIdx + 1);
         if (secondIdx !== -1) {
           return `Error editing file: Multiple occurrences found in ${filePath}. Use replace_all: true to replace all.`;
         }
       }
 
       const newContent = replaceAll
-        ? content.split(oldStr).join(newStr)
-        : content.replace(oldStr, newStr);
+        ? normalizedContent.split(normalizedOldStr).join(newStr)
+        : normalizedContent.replace(normalizedOldStr, newStr);
 
       writeFileSync(filePath, newContent, "utf-8");
       return `Successfully edited ${filePath}`;

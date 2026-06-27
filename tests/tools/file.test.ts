@@ -192,51 +192,135 @@ describe("edit_file", () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it("replaces exact string in file", async () => {
-    const filePath = join(tempDir, "edit.txt");
-    writeFileSync(filePath, "hello world");
-    const result = await editFile.execute({
-      file_path: filePath,
-      old_string: "world",
-      new_string: "there",
+  describe("string replacement mode (existing behavior)", () => {
+    it("replaces exact string in file", async () => {
+      const filePath = join(tempDir, "edit.txt");
+      writeFileSync(filePath, "hello world");
+      const result = await editFile.execute({
+        file_path: filePath,
+        old_string: "world",
+        new_string: "there",
+      });
+      expect(result).toContain("Successfully edited");
+      expect(readFileSync(filePath, "utf-8")).toBe("hello there");
     });
-    expect(result).toContain("Successfully edited");
-    expect(readFileSync(filePath, "utf-8")).toBe("hello there");
+
+    it("errors if old_string not found", async () => {
+      const filePath = join(tempDir, "edit.txt");
+      writeFileSync(filePath, "hello world");
+      const result = await editFile.execute({
+        file_path: filePath,
+        old_string: "missing",
+        new_string: "replacement",
+      });
+      expect(result).toMatch(/error/i);
+    });
+
+    it("errors if old_string appears multiple times without replace_all", async () => {
+      const filePath = join(tempDir, "edit.txt");
+      writeFileSync(filePath, "aaa bbb aaa");
+      const result = await editFile.execute({
+        file_path: filePath,
+        old_string: "aaa",
+        new_string: "ccc",
+      });
+      expect(result).toMatch(/error/i);
+    });
+
+    it("replaces all occurrences when replace_all is true", async () => {
+      const filePath = join(tempDir, "edit.txt");
+      writeFileSync(filePath, "aaa bbb aaa");
+      const result = await editFile.execute({
+        file_path: filePath,
+        old_string: "aaa",
+        new_string: "ccc",
+        replace_all: true,
+      });
+      expect(result).toContain("Successfully edited");
+      expect(readFileSync(filePath, "utf-8")).toBe("ccc bbb ccc");
+    });
+
+    it("handles CRLF line endings in string replacement", async () => {
+      const filePath = join(tempDir, "crlf.txt");
+      // Write file with CRLF line endings
+      writeFileSync(filePath, "line1\r\nline2\r\nline3");
+      const result = await editFile.execute({
+        file_path: filePath,
+        old_string: "line2",
+        new_string: "replaced",
+      });
+      expect(result).toContain("Successfully edited");
+      const content = readFileSync(filePath, "utf-8");
+      expect(content).toContain("replaced");
+      expect(content).not.toContain("line2");
+    });
   });
 
-  it("errors if old_string not found", async () => {
-    const filePath = join(tempDir, "edit.txt");
-    writeFileSync(filePath, "hello world");
-    const result = await editFile.execute({
-      file_path: filePath,
-      old_string: "missing",
-      new_string: "replacement",
+  describe("line number editing mode (C2 new feature)", () => {
+    it("replaces a single line by line number", async () => {
+      const filePath = join(tempDir, "lines.txt");
+      writeFileSync(filePath, "line1\nline2\nline3");
+      const result = await editFile.execute({
+        file_path: filePath,
+        start_line: 2,
+        end_line: 2,
+        new_string: "replaced",
+      });
+      expect(result).toContain("replaced lines 2-2");
+      expect(readFileSync(filePath, "utf-8")).toBe("line1\nreplaced\nline3");
     });
-    expect(result).toMatch(/error/i);
-  });
 
-  it("errors if old_string appears multiple times without replace_all", async () => {
-    const filePath = join(tempDir, "edit.txt");
-    writeFileSync(filePath, "aaa bbb aaa");
-    const result = await editFile.execute({
-      file_path: filePath,
-      old_string: "aaa",
-      new_string: "ccc",
+    it("replaces a range of lines", async () => {
+      const filePath = join(tempDir, "range.txt");
+      writeFileSync(filePath, "line1\nline2\nline3\nline4");
+      const result = await editFile.execute({
+        file_path: filePath,
+        start_line: 2,
+        end_line: 3,
+        new_string: "new line",
+      });
+      expect(result).toContain("replaced lines 2-3");
+      expect(readFileSync(filePath, "utf-8")).toBe("line1\nnew line\nline4");
     });
-    expect(result).toMatch(/error/i);
-  });
 
-  it("replaces all occurrences when replace_all is true", async () => {
-    const filePath = join(tempDir, "edit.txt");
-    writeFileSync(filePath, "aaa bbb aaa");
-    const result = await editFile.execute({
-      file_path: filePath,
-      old_string: "aaa",
-      new_string: "ccc",
-      replace_all: true,
+    it("replaces a range with multiple new lines", async () => {
+      const filePath = join(tempDir, "multi.txt");
+      writeFileSync(filePath, "line1\nline2\nline3");
+      const result = await editFile.execute({
+        file_path: filePath,
+        start_line: 2,
+        end_line: 2,
+        new_string: "replaced1\nreplaced2",
+      });
+      expect(result).toContain("replaced lines 2-2");
+      expect(readFileSync(filePath, "utf-8")).toBe(
+        "line1\nreplaced1\nreplaced2\nline3",
+      );
     });
-    expect(result).toContain("Successfully edited");
-    expect(readFileSync(filePath, "utf-8")).toBe("ccc bbb ccc");
+
+    it("reports error for out-of-range start_line", async () => {
+      const filePath = join(tempDir, "short.txt");
+      writeFileSync(filePath, "only one line");
+      const result = await editFile.execute({
+        file_path: filePath,
+        start_line: 5,
+        end_line: 5,
+        new_string: "nope",
+      });
+      expect(result).toContain("out of range");
+    });
+
+    it("reports error when end_line < start_line", async () => {
+      const filePath = join(tempDir, "lines.txt");
+      writeFileSync(filePath, "a\nb\nc");
+      const result = await editFile.execute({
+        file_path: filePath,
+        start_line: 3,
+        end_line: 1,
+        new_string: "nope",
+      });
+      expect(result).toContain("out of range");
+    });
   });
 });
 
