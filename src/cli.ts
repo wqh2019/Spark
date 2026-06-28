@@ -3,8 +3,9 @@
 import { Command } from "commander";
 import { createInterface } from "node:readline";
 import { Agent } from "./agent.js";
-import { loadConfig } from "./config.js";
+import { loadConfig, createDefaultConfig } from "./config.js";
 import { LogLevel, setLogLevel } from "./logger.js";
+import chalk from "chalk";
 import {
   ConversationMemory,
   listSessions,
@@ -34,7 +35,15 @@ program
   .option("--auto-approve", "Skip all confirmation prompts")
   .option("--verbose", "Enable verbose debug logging")
   .option("--max-steps <n>", "Maximum agent steps", parseInt)
+  .option("--setup", "Create a default config file at ~/.spark/config.json")
   .action(async (query, opts) => {
+    // Handle --setup separately: create config template and exit
+    if (opts.setup) {
+      createDefaultConfig();
+      console.log(chalk.green("✔ Config file created at ~/.spark/config.json"));
+      console.log(`Edit it and replace "${chalk.yellow("sk-your-key-here")}" with your actual API key.`);
+      return;
+    }
     if (opts.verbose) {
       setLogLevel(LogLevel.DEBUG);
     }

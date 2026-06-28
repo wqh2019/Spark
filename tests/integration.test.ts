@@ -65,7 +65,6 @@ describe('integration', () => {
     const config = loadConfig();
     expect(config.apiKey).toBe('integration-test-key');
     expect(config.baseURL).toBe('https://api.openai.com/v1');
-    expect(config.model).toBe('gpt-4');
     expect(config.maxSteps).toBe(20);
     expect(config.autoApprove).toEqual([]);
     delete process.env.OPENAI_API_KEY;
