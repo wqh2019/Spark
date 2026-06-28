@@ -5,8 +5,18 @@ import { createInterface } from "node:readline";
 import { Agent } from "./agent.js";
 import { loadConfig } from "./config.js";
 import { LogLevel, setLogLevel } from "./logger.js";
-import { ConversationMemory, listSessions, getLatestSessionId } from "./memory.js";
-import { renderError, renderInfo, closeConfirmReadline } from "./render.js";
+import {
+  ConversationMemory,
+  listSessions,
+  getLatestSessionId,
+} from "./memory.js";
+import {
+  renderError,
+  renderInfo,
+  renderSuccess,
+  renderDivider,
+  closeConfirmReadline,
+} from "./render.js";
 import { runWithSignal } from "./run-with-signal.js";
 
 const program = new Command();
@@ -25,7 +35,6 @@ program
   .option("--verbose", "Enable verbose debug logging")
   .option("--max-steps <n>", "Maximum agent steps", parseInt)
   .action(async (query, opts) => {
-    // Set log level before anything else
     if (opts.verbose) {
       setLogLevel(LogLevel.DEBUG);
     }
@@ -40,9 +49,7 @@ program
         autoApprove: opts.autoApprove ? ["*"] : undefined,
       });
     } catch (err) {
-      renderError(
-        err instanceof Error ? err.message : String(err),
-      );
+      renderError(err instanceof Error ? err.message : String(err));
       process.exit(1);
     }
 
@@ -90,9 +97,7 @@ program
         `  Auto Approve: ${config.autoApprove.length > 0 ? config.autoApprove.join(", ") : "(none)"}`,
       );
     } catch (err) {
-      renderError(
-        err instanceof Error ? err.message : String(err),
-      );
+      renderError(err instanceof Error ? err.message : String(err));
     }
   });
 
@@ -111,38 +116,53 @@ program
     }
   });
 
-/**
- * Run a single agent turn with SIGINT (Ctrl+C) wired to an AbortController so
- * the user can interrupt long-running queries gracefully. The SIGINT listener
- * is always removed afterwards (on success, error, or interruption).
- */
 export { runWithSignal } from "./run-with-signal.js";
+
+// -----------------------------------------------------------------------
+// Interactive loop with colon commands & readline history
+// -----------------------------------------------------------------------
 
 async function interactiveLoop(agent: Agent): Promise<void> {
   const rl = createInterface({
     input: process.stdin,
     output: process.stdout,
+    // Enable persistent command history across sessions
+    historySize: 100,
   });
 
   const question = (prompt: string): Promise<string> =>
     new Promise((resolve) => rl.question(prompt, resolve));
 
-  renderInfo("Spark coding agent. Type your message, or 'exit' to quit.");
+  renderDivider();
+  renderInfo("Spark coding agent — Type your message, or use :help");
   renderInfo(`Session: ${agent.sessionId}`);
-  renderInfo("Ctrl+C to interrupt | \"\"\" for multi-line input");
+  renderInfo("Ctrl+C to interrupt | \"\"\" for multi-line input | :command");
+  renderDivider();
 
   while (true) {
     const input = await question("\n> ");
     const trimmed = input.trim();
 
     if (!trimmed) continue;
+
+    // --- Colon commands ---
+    if (trimmed.startsWith(":")) {
+      const handled = await handleColonCommand(trimmed, agent);
+      if (handled === "exit") {
+        rl.close();
+        break;
+      }
+      continue;
+    }
+
+    // --- Exit ---
     if (trimmed === "exit" || trimmed === "quit") {
       renderInfo("Goodbye!");
       rl.close();
       break;
     }
 
-    // Multi-line mode: """ starts a block, another """ ends it
+    // --- Multi-line mode ---
     let message = input;
     if (trimmed === '"""') {
       const lines: string[] = [];
@@ -157,10 +177,90 @@ async function interactiveLoop(agent: Agent): Promise<void> {
     }
 
     await runWithSignal(agent, message);
+
+    // Show session cost summary after each response
+    const report = agent["tokenTracker"].getReport();
+    if (report.stepCount > 0) {
+      renderDivider();
+      renderInfo(
+        `Session: ${report.sessionTotalTokens.toLocaleString()} tokens · $${report.estimatedCost.toFixed(4)} · ${report.stepCount} steps`,
+      );
+    }
+  }
+}
+
+/** Handle colon-prefixed commands. Returns "exit" to terminate the loop. */
+async function handleColonCommand(
+  cmd: string,
+  agent: Agent,
+): Promise<"exit" | void> {
+  const parts = cmd.slice(1).split(/\s+/);
+  const command = parts[0].toLowerCase();
+  const args = parts.slice(1);
+
+  switch (command) {
+    case "help":
+    case "?":
+      console.log(`
+  :help        Show this help
+  :plan        Show current task plan
+  :tokens      Show session token usage & cost
+  :sessions    List previous sessions
+  :session     <id>  Resume a specific session
+  :continue    Continue the last session
+  :clear       Clear the terminal screen
+  :exit        Exit the program
+      `);
+      break;
+
+    case "plan":
+      console.log(agent["taskPlanner"].getSummary() || "No active plan.");
+      break;
+
+    case "tokens":
+    case "cost":
+      console.log(agent["tokenTracker"].getSummary());
+      break;
+
+    case "sessions": {
+      const sessions = listSessions();
+      if (sessions.length === 0) {
+        renderInfo("No sessions found.");
+      } else {
+        renderInfo(`Sessions (${sessions.length}):`);
+        for (const id of sessions) {
+          console.log(`  ${id}`);
+        }
+      }
+      break;
+    }
+
+    case "session":
+      if (args.length === 0) {
+        renderError("Usage: :session <id>");
+      } else {
+        renderInfo(`Session switching not yet supported in interactive mode. Use --session ${args[0]} on startup.`);
+      }
+      break;
+
+    case "continue":
+      renderInfo("Use 'spark --continue' at startup to continue the last session.");
+      break;
+
+    case "clear":
+      // ANSI escape sequence to clear screen
+      process.stdout.write("\x1b[2J\x1b[H");
+      break;
+
+    case "exit":
+    case "quit":
+      return "exit";
+
+    default:
+      renderError(`Unknown command: :${command}. Type :help for available commands.`);
   }
 }
 
 program.parse();
 
-// Cleanup: close the shared confirm readline on exit
 process.on("exit", () => closeConfirmReadline());

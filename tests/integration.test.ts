@@ -15,7 +15,7 @@ function makeContext(): ToolContext {
 }
 
 describe('integration', () => {
-  it('tool registry contains all 16 expected tools', () => {
+  it('tool registry contains all 19 expected tools', () => {
     const registry = createToolRegistry(makeContext());
     const names = registry.list().map(t => t.name).sort();
     expect(names).toEqual([
@@ -26,6 +26,8 @@ describe('integration', () => {
       'git_commit',
       'git_diff',
       'git_log',
+      'git_stash',
+      'git_stash_pop',
       'git_status',
       'glob_files',
       'grep_content',
@@ -37,7 +39,7 @@ describe('integration', () => {
       'web_fetch',
       'write_file',
     ]);
-    expect(names).toHaveLength(17);
+    expect(names).toHaveLength(19);
   });
 
   it('confirmation flags match design spec', () => {

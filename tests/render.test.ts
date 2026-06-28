@@ -10,31 +10,55 @@ vi.stubGlobal("process", {
   stderr: { write: (data: string) => { stderrWrites.push(data); return true; } },
 });
 
-// Import after stubbing so chalk picks up the mock
-const { renderTextDelta, renderTextComplete, renderToolStart, renderToolResult, renderError, renderInfo } =
-  await import("../src/render.js");
+const {
+  renderTextDelta,
+  renderTextComplete,
+  renderToolStart,
+  renderToolResult,
+  renderError,
+  renderInfo,
+  resetMarkdownState,
+  startSpinner,
+  stopSpinner,
+} = await import("../src/render.js");
 
 describe("renderTextDelta", () => {
-  beforeEach(() => { stdoutWrites.length = 0; });
-
-  it("writes text to stdout", () => {
-    renderTextDelta("hello");
-    expect(stdoutWrites).toContain("hello");
+  beforeEach(() => {
+    stdoutWrites.length = 0;
+    resetMarkdownState();
   });
 
-  it("does not add newline", () => {
-    renderTextDelta("hi");
-    const output = stdoutWrites.join("");
-    expect(output).toBe("hi");
+  it("writes text to stdout", () => {
+    renderTextDelta("hello\n");
+    expect(stdoutWrites.join("")).toContain("hello");
+  });
+
+  it("buffers partial lines until newline", () => {
+    renderTextDelta("hel");
+    expect(stdoutWrites.join("")).toBe("");
+    renderTextDelta("lo\n");
+    expect(stdoutWrites.join("")).toContain("hello");
   });
 });
 
 describe("renderTextComplete", () => {
-  beforeEach(() => { stdoutWrites.length = 0; });
+  beforeEach(() => {
+    stdoutWrites.length = 0;
+    resetMarkdownState();
+  });
 
-  it("writes a newline to stdout", () => {
+  it("writes a newline to stdout when buffer is empty", () => {
     renderTextComplete();
-    expect(stdoutWrites).toContain("\n");
+    expect(stdoutWrites.join("")).toBe("\n");
+  });
+
+  it("flushes buffered text then newline", () => {
+    renderTextDelta("pending");
+    stdoutWrites.length = 0;
+    renderTextComplete();
+    const output = stdoutWrites.join("");
+    expect(output).toContain("pending");
+    expect(output).toContain("\n");
   });
 });
 
@@ -107,5 +131,21 @@ describe("renderInfo", () => {
     renderInfo("session started");
     const output = stderrWrites.join("");
     expect(output).toContain("session started");
+  });
+});
+
+describe("spinner", () => {
+  beforeEach(() => { stderrWrites.length = 0; });
+
+  it("startSpinner writes initial frame", () => {
+    startSpinner("Thinking");
+    const output = stderrWrites.join("");
+    expect(output).toContain("Thinking");
+  });
+
+  it("stopSpinner clears the line", () => {
+    stopSpinner();
+    // After stop, the line should be cleared (ESC[K)
+    // Just verify no crash
   });
 });

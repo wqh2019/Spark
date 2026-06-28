@@ -57,7 +57,13 @@ export function createFileTools(ctx: ToolContext): Tool[] {
           return err instanceof Error ? err.message : String(err);
         }
 
-        const content = readFileSync(filePath, "utf-8");
+        // Binary content detection: check for null bytes in first 8KB
+        const raw = readFileSync(filePath);
+        if (isBinaryContent(raw)) {
+          return `Binary file detected: ${filePath} (${fileSize} bytes). Use run_command with appropriate tools (e.g., xxd, file, exiftool) to inspect this file.`;
+        }
+
+        const content = raw.toString("utf-8");
         const lines = content.split("\n");
         const selected = lines.slice(offset, offset + limit);
 
@@ -99,6 +105,10 @@ export function createFileTools(ctx: ToolContext): Tool[] {
       } catch (err) {
         return err instanceof Error ? err.message : String(err);
       }
+
+      // Protect sensitive files from accidental overwrite
+      const sensitiveCheck = checkSensitiveFile(filePath);
+      if (sensitiveCheck) return sensitiveCheck;
 
       try {
         const dir = dirname(filePath);
@@ -207,13 +217,44 @@ export function createFileTools(ctx: ToolContext): Tool[] {
         const normalizedContent = content.replace(/\r\n/g, "\n");
         const normalizedOldStr = oldStr.replace(/\r\n/g, "\n");
 
-        if (!normalizedContent.includes(normalizedOldStr)) {
-          return `Error editing file: String not found in ${filePath}`;
+        // Try exact match first
+        let matchIndex = normalizedContent.indexOf(normalizedOldStr);
+
+        // Fallback: fuzzy match (whitespace-normalized) if exact match fails
+        if (matchIndex === -1) {
+          const fuzzyContent = normalizedContent.replace(/\s+/g, " ");
+          const fuzzyOldStr = normalizedOldStr.replace(/\s+/g, " ");
+          matchIndex = fuzzyContent.indexOf(fuzzyOldStr);
+
+          if (matchIndex !== -1) {
+            // Found fuzzy match — reconstruct the actual matched string from original content
+            const beforeFuzzy = normalizedContent.slice(0, matchIndex);
+            const afterFuzzy = normalizedContent.slice(matchIndex + fuzzyOldStr.length);
+            // The actual matched region may differ in whitespace; use the replacement on normalized
+            const beforeLen = beforeFuzzy.length;
+            const afterLen = afterFuzzy.length;
+            // Find actual boundaries by scanning content
+            const actualStart = normalizedContent.slice(0, matchIndex + fuzzyOldStr.length).search(/\S\s*$/);
+            const fuzzyRe = new RegExp(fuzzyOldStr.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/ /g, "\\s+"));
+            const actualMatch = normalizedContent.match(fuzzyRe);
+            if (actualMatch) {
+              const actual = actualMatch[0];
+              const newContent = replaceAll
+                ? normalizedContent.replace(fuzzyRe, newStr)
+                : normalizedContent.replace(actual, newStr);
+              writeFileSync(filePath, newContent, "utf-8");
+              return `Successfully edited ${filePath} (fuzzy match: whitespace differences tolerated)`;
+            }
+          }
+
+          return `Error editing file: String not found in ${filePath}. Tips:
+- Check for trailing/leading whitespace differences
+- Use start_line/end_line for line-based editing
+- The file may have been modified since you last read it`;
         }
 
         if (!replaceAll) {
-          const firstIdx = normalizedContent.indexOf(normalizedOldStr);
-          const secondIdx = normalizedContent.indexOf(normalizedOldStr, firstIdx + 1);
+          const secondIdx = normalizedContent.indexOf(normalizedOldStr, matchIndex + 1);
           if (secondIdx !== -1) {
             return `Error editing file: Multiple occurrences found in ${filePath}. Use replace_all: true to replace all.`;
           }
@@ -282,4 +323,34 @@ export function createFileTools(ctx: ToolContext): Tool[] {
   };
 
   return [readFile, writeFile, editFile, listDir];
+}
+
+/**
+ * Detect binary content by scanning for null bytes in the first 8KB.
+ * Returns true if the content appears to be binary.
+ */
+function isBinaryContent(buf: Buffer): boolean {
+  const checkLen = Math.min(buf.length, 8192);
+  for (let i = 0; i < checkLen; i++) {
+    if (buf[i] === 0) return true;
+  }
+  return false;
+}
+
+/**
+ * Check if the file path targets a sensitive/protected file.
+ * Returns an error message string, or null if safe.
+ */
+function checkSensitiveFile(filePath: string): string | null {
+  const basename = filePath.split(/[\\/]/).pop() ?? "";
+  const SENSITIVE: string[] = [".env", ".env.local", ".env.production"];
+  if (SENSITIVE.includes(basename)) {
+    return `Error: Writing to "${basename}" is blocked for security. Use run_command to manage this file if needed.`;
+  }
+  // Check if inside .git directory
+  const parts = filePath.split(/[\\/]/);
+  if (parts.includes(".git")) {
+    return `Error: Writing to files inside .git directory is blocked.`;
+  }
+  return null;
 }

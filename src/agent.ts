@@ -5,11 +5,13 @@ import { LLMClient } from "./llm.js";
 import { ConversationMemory, type Message, type ToolCall } from "./memory.js";
 import { SafetyChecker } from "./safety.js";
 import { ToolRegistry, createToolRegistry } from "./tools/index.js";
-import type { ToolContext, ToolPlugin } from "./tools/index.js";
+import type { ToolContext, ToolPlugin, Tool } from "./tools/index.js";
 import { requiresConfirmation } from "./safety.js";
 import { buildSystemPrompt, buildDynamicSystemPrompt, buildProjectContext } from "./prompt.js";
 import { TaskPlanner, createTodoTools } from "./task-planner.js";
 import { estimateMessagesTokens } from "./token-counter.js";
+import { TokenTracker } from "./token-tracker.js";
+import { FileBackupManager } from "./undo-manager.js";
 import {
   renderTextDelta,
   renderTextComplete,
@@ -17,7 +19,13 @@ import {
   renderToolResult,
   renderError,
   renderInfo,
+  renderProgress,
+  renderDivider,
+  renderSuccess,
   confirmAction,
+  startSpinner,
+  stopSpinner,
+  resetMarkdownState,
 } from "./render.js";
 
 export interface AgentOptions {
@@ -30,6 +38,8 @@ export interface AgentOptions {
   maxContextTokens?: number;
   /** Token usage threshold (0-1) that triggers summarization. Default 0.8. */
   summarizationThreshold?: number;
+  /** Max total tokens for the entire session (cost cap). 0 = no cap. */
+  maxTotalTokens?: number;
 }
 
 export class Agent {
@@ -44,7 +54,10 @@ export class Agent {
   private taskPlanner: TaskPlanner;
   private maxContextTokens: number;
   private summarizationThreshold: number;
+  private maxTotalTokens: number;
   private projectContext: string;
+  private backupManager: FileBackupManager;
+  private tokenTracker: TokenTracker;
 
   constructor(
     config: SparkConfig,
@@ -59,6 +72,7 @@ export class Agent {
     this.systemPrompt = options?.systemPrompt ?? buildSystemPrompt(this.cwd);
     this.maxContextTokens = options?.maxContextTokens ?? 128_000;
     this.summarizationThreshold = options?.summarizationThreshold ?? 0.8;
+    this.maxTotalTokens = options?.maxTotalTokens ?? 0;
 
     // Initialize TaskPlanner and register TODO tools
     this.taskPlanner = new TaskPlanner();
@@ -78,10 +92,50 @@ export class Agent {
 
     // Cache project context at init time
     this.projectContext = buildProjectContext(this.cwd);
+
+    // Initialize backup manager for undo support (B3)
+    this.backupManager = new FileBackupManager(this.memory.id);
+
+    // Wrap write_file and edit_file with automatic backup (B3)
+    this.wrapWithBackup("write_file");
+    this.wrapWithBackup("edit_file");
+
+    // Initialize token tracker for cost monitoring
+    this.tokenTracker = new TokenTracker(config.model, this.maxTotalTokens);
+
+    // Register undo tool
+    this.registry.register({
+      name: "undo_file_edit",
+      description: "Revert the last file modification (write_file or edit_file) by restoring the original content from backup.",
+      parameters: {},
+      execute: async () => {
+        const result = this.backupManager.restoreLatest();
+        if (!result) return "No file backups available to undo.";
+        return `Reverted changes to "${result.filePath}" (${result.originalContent.length} chars restored).`;
+      },
+    });
+
+    // Register token usage info tool
+    this.registry.register({
+      name: "check_token_usage",
+      description: "Check the current session's token usage and estimated cost. Use this to monitor spending.",
+      parameters: {},
+      execute: async () => this.tokenTracker.getSummary(),
+    });
+
+    // Auto-load checkpoint if resuming an existing session
+    if (memory) {
+      this.taskPlanner.load(this.memory.id);
+    }
   }
 
   get sessionId(): string {
     return this.memory.id;
+  }
+
+  /** Token tracker for cost monitoring. */
+  get tokenUsage(): TokenTracker {
+    return this.tokenTracker;
   }
 
   async run(userMessage: string, signal?: AbortSignal): Promise<string> {
@@ -96,6 +150,7 @@ export class Agent {
 
     for (let step = 0; step < this.maxSteps; step++) {
       if (signal?.aborted) {
+        this.taskPlanner.save(this.memory.id);
         renderInfo("Interrupted by user.");
         return content || "Interrupted by user.";
       }
@@ -106,13 +161,22 @@ export class Agent {
       // Step 2: Check token budget and summarize if needed
       await this.checkTokenBudget();
 
+      // Progress bar for multi-step tasks
+      if (this.maxSteps > 1) {
+        renderProgress(step + 1, this.maxSteps);
+      }
       renderInfo(`Step ${step + 1}/${this.maxSteps}`);
+      renderDivider();
 
       const messages = this.toOpenAIMessages(this.memory.getMessages());
       const toolSchemas = this.registry.getSchemas();
 
       content = "";
       let toolCalls: OpenAI.Chat.Completions.ChatCompletionMessageToolCall[] | undefined;
+
+      // Show spinner while waiting for first token
+      startSpinner("Thinking…");
+      resetMarkdownState();
 
       try {
         for await (const event of this.llm.chatStream(
@@ -122,22 +186,32 @@ export class Agent {
             : undefined,
         )) {
           if (event.type === "text_delta") {
+            stopSpinner();
             renderTextDelta(event.data as string);
             content += event.data;
           } else if (event.type === "tool_call") {
+            stopSpinner();
             toolCalls = event.data as OpenAI.Chat.Completions.ChatCompletionMessageToolCall[];
           } else if (event.type === "usage") {
             const u = event.data as { prompt_tokens: number; completion_tokens: number };
-            renderInfo(`tokens: ${u.prompt_tokens} prompt + ${u.completion_tokens} completion`);
+            this.tokenTracker.recordStep(u.prompt_tokens, u.completion_tokens);
+            renderInfo(`tokens: ${u.prompt_tokens} prompt + ${u.completion_tokens} completion (total: ${this.tokenTracker.totalTokens.toLocaleString()})`);
+            // Check cost budget
+            if (this.tokenTracker.isOverBudget) {
+              renderError(`Token budget exceeded! Total: ${this.tokenTracker.totalTokens.toLocaleString()} / ${this.maxTotalTokens.toLocaleString()}`);
+              return content || "Token budget exceeded. Task terminated.";
+            }
           } else if (event.type === "done") {
             content = (event.data as { content: string }).content ?? content;
           }
         }
       } catch (err) {
+        stopSpinner();
         const msg = err instanceof Error ? err.message : String(err);
         renderError(msg);
         return msg;
       }
+      stopSpinner();
       renderTextComplete();
 
       this.memory.addMessage("assistant", content, {
@@ -152,6 +226,7 @@ export class Agent {
       await this.executeToolCalls(toolCalls);
     }
 
+    this.taskPlanner.save(this.memory.id);
     const limitMsg = `Reached maximum steps (${this.maxSteps}). Task may be incomplete.`;
     renderInfo(limitMsg);
     return limitMsg;
@@ -286,6 +361,9 @@ ${toSummarize.map((m) => `[${m.role}]: ${m.content.slice(0, 600)}`).join("\n\n")
         tool_call_id: tc.id,
       });
     }
+
+    // Persist task plan checkpoint after tool execution (B4)
+    this.taskPlanner.save(this.memory.id);
   }
 
   private async confirmTools(
@@ -349,15 +427,25 @@ ${toSummarize.map((m) => `[${m.role}]: ${m.content.slice(0, 600)}`).join("\n\n")
       renderToolStart(tc.function.name, args);
     }
 
-    let execResult: string;
+    let execResult = "";
     let isError = false;
 
     if (tool) {
-      try {
-        execResult = await tool.execute(args);
-      } catch (err: any) {
-        execResult = `Error executing ${tc.function.name}: ${err.message}`;
-        isError = true;
+      // Auto-retry once for transient failures (B3)
+      for (let attempt = 0; attempt <= 1; attempt++) {
+        try {
+          execResult = await tool.execute(args);
+          break;
+        } catch (err: any) {
+          if (attempt === 0) {
+            renderInfo(
+              `Retrying ${tc.function.name} after error: ${err.message}`,
+            );
+            continue;
+          }
+          execResult = `Error executing ${tc.function.name}: ${err.message}`;
+          isError = true;
+        }
       }
     } else {
       execResult = `Error: unknown tool "${tc.function.name}"`;
@@ -365,6 +453,25 @@ ${toSummarize.map((m) => `[${m.role}]: ${m.content.slice(0, 600)}`).join("\n\n")
     }
 
     return { result: execResult, isError };
+  }
+
+  /**
+   * Wrap a file-modifying tool with automatic backup before execution.
+   * Ensures the original file content is saved before any modification.
+   */
+  private wrapWithBackup(toolName: string): void {
+    const tool = this.registry.get(toolName);
+    if (!tool) return;
+
+    const originalExecute = tool.execute.bind(tool);
+    tool.execute = async (args) => {
+      // Determine the file path from args (both write_file and edit_file use "file_path")
+      const filePath = args.file_path as string | undefined;
+      if (filePath) {
+        this.backupManager.backupBeforeWrite(filePath, toolName);
+      }
+      return originalExecute(args);
+    };
   }
 
   private parseArgs(argsStr: string): Record<string, unknown> {

@@ -5,6 +5,8 @@ export interface LLMConfig {
   apiKey: string;
   baseURL: string;
   model: string;
+  /** Request timeout in ms (for both chat and chatStream). Default: 120_000. */
+  timeout?: number;
 }
 
 export interface LLMResponse {
@@ -21,13 +23,17 @@ export interface StreamUsage {
 export class LLMClient {
   readonly client: OpenAI;
   readonly model: string;
+  readonly timeout: number;
 
   constructor(config: LLMConfig) {
     this.client = new OpenAI({
       apiKey: config.apiKey,
       baseURL: config.baseURL,
+      timeout: config.timeout ?? 120_000,
+      maxRetries: 0, // we handle retries ourselves in withRetry
     });
     this.model = config.model;
+    this.timeout = config.timeout ?? 120_000;
   }
 
   async chat(
@@ -64,9 +70,27 @@ export class LLMClient {
   async *chatStream(
     messages: ChatCompletionMessageParam[],
     tools?: OpenAI.Chat.Completions.ChatCompletionTool[],
+    signal?: AbortSignal,
   ): AsyncGenerator<
     { type: "text_delta" | "tool_call" | "usage" | "done"; data?: unknown }
   > {
+    // Use a timeout controller: whichever fires first (timeout or caller signal) aborts
+    const timeoutController = new AbortController();
+    const timeoutId = setTimeout(() => {
+      timeoutController.abort(new Error(`LLM request timed out after ${this.timeout}ms`));
+    }, this.timeout);
+
+    // If the caller provided a signal, forward its abort to our controller
+    if (signal) {
+      const onAbort = () => {
+        timeoutController.abort(signal.reason);
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+      // Clean up the listener when the stream completes
+      const cleanup = () => signal.removeEventListener("abort", onAbort);
+      // We'll call cleanup at the end of this function
+    }
+
     const params: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
       model: this.model,
       messages,
@@ -77,7 +101,16 @@ export class LLMClient {
       params.tools = tools;
     }
 
-    const stream = await this.client.chat.completions.create(params);
+    let stream: AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>;
+    try {
+      stream = await this.client.chat.completions.create(
+        params,
+        { signal: timeoutController.signal },
+      );
+    } catch (err) {
+      clearTimeout(timeoutId);
+      throw err;
+    }
 
     let content = "";
     const toolCallMap = new Map<
@@ -85,7 +118,8 @@ export class LLMClient {
       { id: string; name: string; arguments: string }
     >();
 
-    for await (const chunk of stream) {
+    try {
+      for await (const chunk of stream) {
       // The final chunk carries usage info when stream_options.include_usage is true
       if (chunk.usage) {
         yield {
@@ -121,6 +155,9 @@ export class LLMClient {
           if (tc.function?.arguments) entry.arguments += tc.function.arguments;
         }
       }
+    }
+    } finally {
+      clearTimeout(timeoutId);
     }
 
     if (toolCallMap.size > 0) {

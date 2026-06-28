@@ -1,4 +1,8 @@
 import type { Tool } from "./tools/index.js";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
+import { getCheckpointsDir } from "./config.js";
+import { logger } from "./logger.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -14,24 +18,32 @@ export interface TodoItem {
   notes?: string;
 }
 
+export interface CheckpointSnapshot {
+  planGoal: string;
+  tasks: TodoItem[];
+  checkpointNotes: string[];
+}
+
 // ---------------------------------------------------------------------------
 // TaskPlanner
 // ---------------------------------------------------------------------------
 
 /**
  * Manages a task plan with checkpoints for long-running agent tasks.
- * Provides summarization for prompt injection and undo-level checkpointing.
+ * Supports serialization/deserialization for session resume (B4).
  */
 export class TaskPlanner {
   private planGoal = "";
   private tasks: TodoItem[] = [];
   private checkpointNotes: string[] = [];
+  private dirty = false;
 
   /** Create a new task plan with a goal and task list. Clears any existing plan. */
   createPlan(goal: string, items: TodoItem[]): { result: string } {
     this.planGoal = goal;
     this.tasks = items.map((t) => ({ ...t }));
     this.checkpointNotes = [];
+    this.dirty = true;
     return {
       result: `Plan created: "${goal}" with ${items.length} tasks.\n${this.formatPlan()}`,
     };
@@ -80,6 +92,7 @@ export class TaskPlanner {
     const task = this.tasks[idx];
     if (updates.status) task.status = updates.status;
     if (updates.notes !== undefined) task.notes = updates.notes;
+    this.dirty = true;
     return {
       result: `Task "${id}" updated: status=${task.status}${updates.notes ? `, notes="${updates.notes}"` : ""}`,
     };
@@ -93,7 +106,62 @@ export class TaskPlanner {
   /** Add a checkpoint note for later reference / resume. */
   addCheckpoint(note: string): { result: string } {
     this.checkpointNotes.push(note);
+    this.dirty = true;
     return { result: `Checkpoint added: ${note}` };
+  }
+
+  // -----------------------------------------------------------------------
+  // Persistence — supports session resume (B4)
+  // -----------------------------------------------------------------------
+
+  /** Serialize the current plan state to a JSON snapshot. */
+  toJSON(): CheckpointSnapshot {
+    return {
+      planGoal: this.planGoal,
+      tasks: this.tasks.map((t) => ({ ...t })),
+      checkpointNotes: [...this.checkpointNotes],
+    };
+  }
+
+  /** Restore plan state from a JSON snapshot. */
+  fromJSON(snapshot: CheckpointSnapshot): void {
+    this.planGoal = snapshot.planGoal;
+    this.tasks = snapshot.tasks.map((t) => ({ ...t }));
+    this.checkpointNotes = [...snapshot.checkpointNotes];
+    this.dirty = false;
+  }
+
+  /** Save the plan state to disk: `~/.spark/checkpoints/<sessionId>.json`. */
+  save(sessionId: string): void {
+    if (!this.dirty && !this.planGoal) return;
+    try {
+      const dir = getCheckpointsDir();
+      const file = join(dir, `${sessionId}.json`);
+      writeFileSync(file, JSON.stringify(this.toJSON(), null, 2), "utf-8");
+      this.dirty = false;
+    } catch (err) {
+      logger.warn(
+        `Failed to save checkpoint: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  /** Load the plan state from disk. Returns true if a checkpoint was found. */
+  load(sessionId: string): boolean {
+    try {
+      const dir = getCheckpointsDir();
+      const file = join(dir, `${sessionId}.json`);
+      if (!existsSync(file)) return false;
+      const raw = readFileSync(file, "utf-8");
+      const snapshot = JSON.parse(raw) as CheckpointSnapshot;
+      this.fromJSON(snapshot);
+      return true;
+    } catch (err) {
+      logger.warn(
+        `Failed to load checkpoint: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return false;
+    }
   }
 
   // -----------------------------------------------------------------------

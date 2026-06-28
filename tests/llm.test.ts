@@ -253,6 +253,7 @@ describe("LLMClient", () => {
         stream: true,
         stream_options: { include_usage: true },
       }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
 

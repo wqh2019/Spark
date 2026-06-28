@@ -23,7 +23,7 @@ function getTool(tools: Tool[], name: string): Tool {
 describe("createDevTools export", () => {
   const ctx = makeContext(process.cwd());
 
-  it("exports all 9 dev tools", () => {
+  it("exports all 11 dev tools", () => {
     const tools = createDevTools(ctx);
     const names = tools.map((t) => t.name);
     expect(names).toContain("git_status");
@@ -32,10 +32,12 @@ describe("createDevTools export", () => {
     expect(names).toContain("git_commit");
     expect(names).toContain("git_log");
     expect(names).toContain("git_checkout");
+    expect(names).toContain("git_stash");
+    expect(names).toContain("git_stash_pop");
     expect(names).toContain("format");
     expect(names).toContain("lint");
     expect(names).toContain("test");
-    expect(tools).toHaveLength(9);
+    expect(tools).toHaveLength(11);
   });
 
   it("format, lint, git_add, git_commit, git_checkout require confirmation", () => {

@@ -9,6 +9,7 @@ export interface SparkConfig {
   model: string;
   maxSteps: number;
   autoApprove: string[];
+  llmTimeout?: number;
 }
 
 const SPARK_DIR = join(homedir(), ".spark");
@@ -73,6 +74,14 @@ export function ensureSparkDir(): string {
 
 export function getSessionsDir(): string {
   const dir = join(ensureSparkDir(), "sessions");
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
+  }
+  return dir;
+}
+
+export function getCheckpointsDir(): string {
+  const dir = join(ensureSparkDir(), "checkpoints");
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }

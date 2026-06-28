@@ -11,7 +11,13 @@ vi.mock("../src/render.js", () => ({
   renderToolResult: vi.fn(),
   renderError: vi.fn(),
   renderInfo: vi.fn(),
+  renderSuccess: vi.fn(),
+  renderProgress: vi.fn(),
+  renderDivider: vi.fn(),
   confirmAction: vi.fn(),
+  startSpinner: vi.fn(),
+  stopSpinner: vi.fn(),
+  resetMarkdownState: vi.fn(),
 }));
 
 // Helper: create a mock chatStream async generator
