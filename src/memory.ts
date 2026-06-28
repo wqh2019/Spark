@@ -8,6 +8,10 @@ import {
 import { join } from "node:path";
 import { getSessionsDir } from "./config.js";
 import { logger } from "./logger.js";
+import {
+  truncateToolResult,
+  estimateMessagesTokens,
+} from "./token-counter.js";
 
 export interface Message {
   role: "system" | "user" | "assistant" | "tool";
@@ -31,9 +35,17 @@ export class ConversationMemory {
   private maxMessages: number;
   private sessionId: string;
   private sessionFile: string;
+  private maxToolResultChars: number;
+  private maxTokens: number;
 
-  constructor(maxMessages = 50, sessionId?: string) {
+  constructor(
+    maxMessages = 50,
+    sessionId?: string,
+    options?: { maxToolResultChars?: number; maxTokens?: number },
+  ) {
     this.maxMessages = maxMessages;
+    this.maxToolResultChars = options?.maxToolResultChars ?? 2000;
+    this.maxTokens = options?.maxTokens ?? 128_000;
     if (sessionId) {
       this.sessionId = sessionId;
     } else {
@@ -52,10 +64,15 @@ export class ConversationMemory {
     content: string,
     extra?: { tool_call_id?: string; name?: string; tool_calls?: ToolCall[] },
   ): void {
+    // Truncate tool results to avoid context bloat
+    if (role === "tool") {
+      content = truncateToolResult(content, this.maxToolResultChars);
+    }
     const message: Message = { role, content, ...extra };
     this.messages.push(message);
     this.persistMessage(message);
     this.trimIfNeeded();
+    this.trimByTokens();
   }
 
   getMessages(): Message[] {
@@ -65,6 +82,7 @@ export class ConversationMemory {
   setMessages(messages: Message[]): void {
     this.messages = [...messages];
     this.trimIfNeeded();
+    this.trimByTokens();
     this.persistAll();
   }
 
@@ -82,6 +100,50 @@ export class ConversationMemory {
     } catch {
       this.messages = [];
     }
+  }
+
+  /** Estimated total token count for all messages. */
+  get estimatedTokens(): number {
+    return estimateMessagesTokens(this.messages);
+  }
+
+  /**
+   * Replace older messages with a summary message for token budget management.
+   * Keeps the system prompt (if present) and the last `keepCount` messages,
+   * inserting a summary of everything else at the front.
+   */
+  replaceWithSummary(
+    summaryContent: string,
+    keepCount: number,
+  ): void {
+    if (this.messages.length <= keepCount + 1) return;
+
+    const hasSystem = this.messages.length > 0 && this.messages[0].role === "system";
+    const systemMsg = hasSystem ? this.messages[0] : null;
+    const rest = hasSystem ? this.messages.slice(1) : this.messages;
+
+    const kept = rest.slice(-keepCount);
+    const summary: Message = {
+      role: "system",
+      content: `[Summary of previous context]:\n${summaryContent}`,
+    };
+
+    this.messages = systemMsg ? [systemMsg, summary, ...kept] : [summary, ...kept];
+    this.persistAll();
+  }
+
+  /**
+   * Update the first (system) message content in-place.
+   * Does NOT trigger trimming, avoiding unnecessary re-persist of all messages.
+   */
+  updateSystemPrompt(content: string): void {
+    if (this.messages.length > 0 && this.messages[0].role === "system") {
+      this.messages[0].content = content;
+    } else {
+      // Prepend a system message
+      this.messages.unshift({ role: "system", content });
+    }
+    this.persistAll();
   }
 
   private trimIfNeeded(): void {
@@ -138,6 +200,68 @@ export class ConversationMemory {
     }
 
     this.messages = hasProtectedSystem ? [msgs[0], ...kept] : kept;
+  }
+
+  /**
+   * Token-aware trimming: if estimated tokens exceed maxTokens, greedily
+   * drop older message groups (preserving group integrity) until under budget.
+   * Always keeps at least the system prompt + 1 user/assistant turn.
+   */
+  private trimByTokens(): void {
+    const estimated = this.estimatedTokens;
+    if (estimated <= this.maxTokens) return;
+
+    const msgs = this.messages;
+    const hasSystem = msgs.length > 0 && msgs[0].role === "system";
+    const protectedCount = hasSystem ? 1 : 0;
+    const rest = msgs.slice(protectedCount);
+
+    // --- group into indivisible units (same logic as trimIfNeeded) ---
+    const groups: Message[][] = [];
+    let i = 0;
+    while (i < rest.length) {
+      const m = rest[i];
+      if (m.role === "assistant" && m.tool_calls && m.tool_calls.length > 0) {
+        const group: Message[] = [m];
+        let j = i + 1;
+        while (j < rest.length && rest[j].role === "tool") {
+          group.push(rest[j]);
+          j++;
+        }
+        groups.push(group);
+        i = j;
+      } else {
+        groups.push([m]);
+        i++;
+      }
+    }
+
+    // --- calculate token cost per group ---
+    const groupCost = groups.map(
+      (g) => estimateMessagesTokens(g.map((m) => ({ role: m.role, content: m.content }))),
+    );
+    const totalCost = groupCost.reduce((a, b) => a + b, 0);
+    const budget = this.maxTokens - (hasSystem ? estimateMessagesTokens([{ role: msgs[0].role, content: msgs[0].content }]) + 10 : 0);
+
+    if (budget <= 0) {
+      this.messages = hasSystem ? [msgs[0]] : [];
+      return;
+    }
+
+    // Greedily keep from tail until we fit in budget
+    const kept: Message[] = [];
+    let runningCost = 0;
+    for (let k = groups.length - 1; k >= 0; k--) {
+      const cost = groupCost[k];
+      if (runningCost + cost <= budget) {
+        kept.unshift(...groups[k]);
+        runningCost += cost;
+      } else {
+        break;
+      }
+    }
+
+    this.messages = hasSystem ? [msgs[0], ...kept] : kept;
   }
 
   private persistMessage(message: Message): void {

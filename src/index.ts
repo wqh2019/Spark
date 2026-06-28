@@ -1,4 +1,5 @@
 export { Agent, runAgent } from './agent.js';
+export type { AgentOptions } from './agent.js';
 export { LLMClient } from './llm.js';
 export type { LLMConfig } from './llm.js';
 export { ConversationMemory } from './memory.js';
@@ -8,3 +9,7 @@ export type { SparkConfig } from './config.js';
 export { ToolRegistry, createToolRegistry } from './tools/index.js';
 export type { Tool } from './tools/index.js';
 export { SafetyChecker, requiresConfirmation } from './safety.js';
+export { TaskPlanner } from './task-planner.js';
+export type { TodoItem, TaskStatus } from './task-planner.js';
+export { estimateTokens, estimateMessagesTokens, truncateToolResult } from './token-counter.js';
+export { buildDynamicSystemPrompt, buildProjectContext } from './prompt.js';
